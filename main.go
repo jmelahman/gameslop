@@ -31,8 +31,9 @@ func main() {
 	log.Printf("catalog: %d items, %d heroes", len(cat.Items), len(cat.Heroes))
 
 	deps := api.Deps{
-		Catalog: cat,
-		Runs:    store.NewRunStore(database, cat),
+		Catalog:    cat,
+		Runs:       store.NewRunStore(database, cat),
+		Encounters: store.NewEncounterStore(database),
 	}
 
 	mux := http.NewServeMux()

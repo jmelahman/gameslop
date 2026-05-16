@@ -1,9 +1,9 @@
 import { createBrowserRouter } from "react-router";
 import { ErrorElement } from "@/components/ErrorElement";
 import { RunGuard } from "@/components/RunGuard";
-import CombatPage from "@/features/combat";
+import CombatPage from "@/features/combat/CombatPage";
 import HeroSelectPage from "@/features/hero-select";
-import ResultsPage from "@/features/results";
+import ResultsPage from "@/features/results/ResultsPage";
 import SettingsPage from "@/features/settings";
 import ShopPage from "@/features/shop";
 import StartMenuPage from "@/features/start-menu/StartMenuPage";

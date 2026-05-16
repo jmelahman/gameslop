@@ -57,3 +57,36 @@ export type WireError = {
   error: string;
   code?: string;
 };
+
+export type CombatOutcome = "win" | "loss" | "tie";
+
+export type WireTickEvent = {
+  tick: number;
+  type: string;
+  source?: string;
+  target?: string;
+  value?: number;
+};
+
+export type WireCombatResult = {
+  seed: number;
+  outcome: CombatOutcome;
+  player_start_hp: number;
+  opponent_start_hp: number;
+  player_end_hp: number;
+  opponent_end_hp: number;
+  player_board?: WireBoardItem[];
+  opponent_board?: WireBoardItem[];
+  ticks: WireTickEvent[];
+};
+
+export type WireCombatResponse = {
+  result: WireCombatResult;
+  run?: WireActiveRun;
+  player_board: WireBoardItem[];
+  opponent_board: WireBoardItem[];
+  opponent_hp: number;
+  day: number;
+  ended: boolean;
+  final_outcome?: RunStatus;
+};

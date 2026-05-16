@@ -211,24 +211,108 @@ func (s *RunStore) UpdateState(ctx context.Context, state *model.RunState) error
 	return nil
 }
 
-// Abandon marks the player's active run as abandoned. Returns ErrNoActiveRun
-// if there isn't one.
+// Abandon marks the player's active run as abandoned and writes the matching
+// run_history row, all in one transaction. Returns ErrNoActiveRun if there
+// isn't one.
 func (s *RunStore) Abandon(ctx context.Context, playerID int64) error {
-	now := time.Now().Unix()
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE runs SET status = 'abandoned', ended_at = ?
-		WHERE player_id = ? AND status = 'active'`, now, playerID)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+	defer tx.Rollback()
+
+	var (
+		runID  int64
+		heroID string
+	)
+	err = tx.QueryRowContext(ctx, `
+		SELECT id, hero_id FROM runs
+		WHERE player_id = ? AND status = 'active' LIMIT 1`, playerID,
+	).Scan(&runID, &heroID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNoActiveRun
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+
+	var day int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT day FROM run_state WHERE run_id = ?`, runID,
+	).Scan(&day); err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs SET status = 'abandoned', ended_at = ? WHERE id = ?`,
+		now, runID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO run_history (player_id, run_id, hero_id, days_reached, outcome, finished_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		playerID, runID, heroID, day, string(model.RunStatusAbandoned), now,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Finish closes a run with the given terminal outcome (won/lost) and writes
+// the matching run_history row in a single transaction. The caller must
+// ensure outcome is RunStatusWon or RunStatusLost.
+func (s *RunStore) Finish(ctx context.Context, runID int64, outcome model.RunStatus) error {
+	if outcome != model.RunStatusWon && outcome != model.RunStatusLost {
+		return fmt.Errorf("invalid finish outcome %q", outcome)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var (
+		playerID int64
+		heroID   string
+		status   string
+	)
+	err = tx.QueryRowContext(ctx,
+		`SELECT player_id, hero_id, status FROM runs WHERE id = ?`, runID,
+	).Scan(&playerID, &heroID, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNoActiveRun
+	}
+	if err != nil {
+		return err
+	}
+	if status != string(model.RunStatusActive) {
+		return ErrNoActiveRun
+	}
+
+	var day int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT day FROM run_state WHERE run_id = ?`, runID,
+	).Scan(&day); err != nil {
+		return err
+	}
+
+	now := time.Now().Unix()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs SET status = ?, ended_at = ? WHERE id = ?`,
+		string(outcome), now, runID,
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO run_history (player_id, run_id, hero_id, days_reached, outcome, finished_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		playerID, runID, heroID, day, string(outcome), now,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func randSeed() (int64, error) {

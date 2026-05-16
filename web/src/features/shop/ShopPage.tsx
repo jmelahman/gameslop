@@ -10,10 +10,11 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Coins, Heart, Sparkles } from "lucide-react";
+import { Coins, Heart, Sparkles, Swords } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
+import { startCombat } from "@/api/combat";
 import { abandonRun } from "@/api/runs";
 import {
   buyShopItem,
@@ -40,11 +41,31 @@ const BOARD_WIDTH = 10;
 export default function ShopPage() {
   const navigate = useNavigate();
   const clearRun = useRunStore((s) => s.clearRun);
+  const setPhase = useRunStore((s) => s.setPhase);
+  const setCombat = useRunStore((s) => s.setCombat);
   const qc = useQueryClient();
   const { data, isLoading } = useRun();
   const catalog = useCatalog();
   const itemIndex = useItemIndex();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const combat = useMutation({
+    mutationFn: startCombat,
+    onSuccess: (resp) => {
+      setCombat(resp);
+      setPhase("combat");
+      if (resp.run) {
+        qc.setQueryData(RUN_QUERY_KEY, resp.run);
+      }
+      navigate("/run/combat");
+    },
+    onError: (err) => {
+      if (err instanceof ApiError) setErrorMessage(err.message);
+      else if (err instanceof Error) setErrorMessage(err.message);
+      else setErrorMessage("Failed to start combat");
+    },
+    throwOnError: false,
+  });
 
   useEffect(() => {
     if (!isLoading && data === null) {
@@ -140,6 +161,18 @@ export default function ShopPage() {
             label="gold"
             value={state.gold}
           />
+          <button
+            type="button"
+            onClick={() => {
+              setErrorMessage(null);
+              combat.mutate();
+            }}
+            disabled={combat.isPending}
+            className="flex items-center gap-1.5 rounded-md border border-amber-600 bg-amber-500/10 px-3 py-1.5 font-medium text-amber-100 text-sm hover:bg-amber-500/20 disabled:opacity-50"
+          >
+            <Swords className="h-4 w-4" />
+            {combat.isPending ? "Starting…" : "Start Combat"}
+          </button>
           <button
             type="button"
             onClick={() => abandon.mutate()}
@@ -295,7 +328,7 @@ function applyBuy(
   itemIndex: Record<string, Item>,
 ): ActiveRun | null {
   const slot = run.state.shop[shopIndex];
-  if (!slot || !slot.itemId) return null;
+  if (!slot?.itemId) return null;
   const def = itemIndex[slot.itemId];
   if (!def) return null;
   if (run.state.gold < def.buyCost) return null;
@@ -342,7 +375,7 @@ function applyRefreshCost(run: ActiveRun, cost: number): ActiveRun | null {
 
 function applyFreeze(run: ActiveRun, index: number, frozen: boolean): ActiveRun | null {
   const slot = run.state.shop[index];
-  if (!slot || !slot.itemId) return null;
+  if (!slot?.itemId) return null;
   run.state.shop[index] = { ...slot, frozen };
   return run;
 }
