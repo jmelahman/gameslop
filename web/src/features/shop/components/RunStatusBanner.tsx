@@ -4,9 +4,13 @@
 // Action buttons (Start Combat, Abandon) live here too so the banner is the
 // single place to read "where am I and what can I do next".
 
-import { motion } from "framer-motion";
-import { Coins, Heart, Sparkles, Swords, TrendingUp } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Heart, Sparkles, Swords, TrendingUp } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import { GoldCounter } from "./GoldCounter";
+
+const LEVELUP_FLASH_MS = 900;
 
 type Props = {
   heroName: string;
@@ -53,8 +57,22 @@ export function RunStatusBanner({
   const atMaxLevel = shopLevel >= maxShopLevel;
   const xpPct = atMaxLevel || xpToLevel === null ? 100 : Math.min(100, (xp / xpToLevel) * 100);
 
+  // Watch for shop-level increases and trigger a one-shot flash on the level
+  // chip + a "Level Up!" badge that floats over the banner.
+  const prevLevel = useRef(shopLevel);
+  const [leveled, setLeveled] = useState(false);
+  useEffect(() => {
+    if (shopLevel > prevLevel.current) {
+      setLeveled(true);
+      const t = window.setTimeout(() => setLeveled(false), LEVELUP_FLASH_MS);
+      prevLevel.current = shopLevel;
+      return () => window.clearTimeout(t);
+    }
+    prevLevel.current = shopLevel;
+  }, [shopLevel]);
+
   return (
-    <header className="grid gap-4 rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
+    <header className="relative grid gap-4 rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-4 lg:grid-cols-[1fr_auto_1fr] lg:items-center">
       <div className="flex items-center gap-3">
         <Sparkles className="h-5 w-5 text-amber-400" />
         <div>
@@ -87,7 +105,21 @@ export function RunStatusBanner({
           </div>
         </div>
 
-        <div className="flex w-40 flex-col gap-1">
+        <motion.div
+          className="relative flex w-40 flex-col gap-1"
+          animate={
+            leveled
+              ? {
+                  boxShadow: [
+                    "0 0 0 0 rgba(52,211,153,0)",
+                    "0 0 24px 4px rgba(52,211,153,0.55)",
+                    "0 0 0 0 rgba(52,211,153,0)",
+                  ],
+                }
+              : { boxShadow: "0 0 0 0 rgba(52,211,153,0)" }
+          }
+          transition={{ duration: LEVELUP_FLASH_MS / 1000, ease: "easeOut" }}
+        >
           <div className="flex items-baseline justify-between text-slate-300 text-xs uppercase tracking-wider">
             <span className="flex items-center gap-1">
               <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />
@@ -105,18 +137,27 @@ export function RunStatusBanner({
               transition={{ duration: 0.4, ease: "easeOut" }}
             />
           </div>
-        </div>
+          <AnimatePresence>
+            {leveled ? (
+              <motion.span
+                key={`up-${shopLevel}`}
+                initial={{ opacity: 0, y: 0, scale: 0.9 }}
+                animate={{
+                  opacity: [0, 1, 1, 0],
+                  y: [-2, -16, -24, -34],
+                  scale: [0.9, 1.05, 1, 1],
+                }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: LEVELUP_FLASH_MS / 1000, ease: "easeOut" }}
+                className="-translate-x-1/2 pointer-events-none absolute top-0 left-1/2 rounded bg-emerald-500/90 px-2 py-0.5 font-semibold text-emerald-950 text-xs uppercase tracking-wider shadow"
+              >
+                Level Up!
+              </motion.span>
+            ) : null}
+          </AnimatePresence>
+        </motion.div>
 
-        <div className="flex flex-col items-end gap-0.5 text-sm">
-          <div className="flex items-center gap-1.5">
-            <Coins className="h-4 w-4 text-amber-300" />
-            <span className="font-mono text-base">{gold}</span>
-            <span className="text-slate-500 text-xs uppercase tracking-wider">gold</span>
-          </div>
-          {nextDayGold > 0 ? (
-            <p className="text-amber-300/70 text-xs">+{nextDayGold} next day</p>
-          ) : null}
-        </div>
+        <GoldCounter value={gold} nextDayGold={nextDayGold} />
 
         <div className="flex flex-col items-end gap-1.5">
           <button

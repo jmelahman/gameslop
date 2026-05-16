@@ -1,15 +1,16 @@
 // ShopPage — the player's between-combat hub. Layout, top to bottom:
 //   1. Hero / day / gold / HP banner
 //   2. Board (10-cell grid, multi-slot items)
-//   3. Bench
-//   4. Sell zone
-//   5. Shop row (refresh, freeze, xp, click-to-buy)
+//   3. Synergy panel (board tag tally + cross-highlight)
+//   4. Bench
+//   5. Sell zone
+//   6. Shop row (refresh, freeze, xp, click-to-buy)
 //
 // All cross-area transitions are driven by drag-and-drop via @dnd-kit. The
 // page owns the <DndContext>, tracks the active drag source, and routes
 // drag-end events to the appropriate optimistic mutation. Click-to-buy in
-// the shop row is preserved as a convenience; everything else (place, move,
-// remove, sell) is drag-only.
+// the shop row, right-click-to-sell on the bench/board, and keyboard
+// shortcuts (R/F/Space/?) round out the interaction surface.
 
 import {
   type CollisionDetection,
@@ -26,6 +27,7 @@ import {
 } from "@dnd-kit/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
+import { Keyboard } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
@@ -61,7 +63,10 @@ import { DayTransition } from "./components/DayTransition";
 import { RunStatusBanner } from "./components/RunStatusBanner";
 import { SellZone } from "./components/SellZone";
 import { ShopRow } from "./components/ShopRow";
+import { ShortcutsOverlay } from "./components/ShortcutsOverlay";
+import { SynergyPanel } from "./components/SynergyPanel";
 import { boardRangeFree, type DragSource, type DropTarget } from "./dnd";
+import { countBoardTags, tagsOfItem } from "./synergy";
 
 const INVALID_FLASH_MS = 350;
 
@@ -86,6 +91,11 @@ export default function ShopPage() {
   // Dragging state owned by the page.
   const [activeSource, setActiveSource] = useState<DragSource | null>(null);
   const [hover, setHover] = useState<HoverState | null>(null);
+
+  // Cross-card hover + keyboard-target tracking.
+  const [hoveredShopIndex, setHoveredShopIndex] = useState<number | null>(null);
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const combat = useMutation({
     mutationFn: startCombat,
@@ -175,15 +185,10 @@ export default function ShopPage() {
     throwOnError: false,
   });
 
-  // PointerSensor with a small activation distance so click-to-buy still works
-  // — the drag doesn't engage until the pointer moves 5px.
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const board = data?.state.board ?? [];
 
-  // Collision strategy: pointerWithin works well for the bench/sell zone (they
-  // are large rectangles), but board cells are narrow and adjacent — fall back
-  // to rectIntersection if pointerWithin misses.
   const collisionDetection = useCallback<CollisionDetection>((args) => {
     const pw = pointerWithin(args);
     if (pw.length > 0) return pw;
@@ -238,7 +243,6 @@ export default function ShopPage() {
         setHover(null);
         if (src.kind === "hand") optimisticSell.mutate({ location: "hand", slot: src.slot });
         else if (src.kind === "board") optimisticSell.mutate({ location: "board", slot: src.slot });
-        // shop → sell is meaningless (the item isn't owned yet).
         return;
       }
 
@@ -246,7 +250,6 @@ export default function ShopPage() {
         setHover(null);
         if (src.kind === "shop") optimisticBuy.mutate(src.index);
         else if (src.kind === "board") optimisticRemove.mutate(src.slot);
-        // hand → bench is already on the bench: no-op.
         return;
       }
 
@@ -266,9 +269,6 @@ export default function ShopPage() {
           if (src.slot === start) return;
           optimisticMove.mutate({ from: src.slot, to: start });
         } else if (src.kind === "shop") {
-          // MVP: dragging a shop item to a specific board cell still just
-          // buys it (lands on bench). A future polish phase can chain buy +
-          // place atomically so the item lands where the player aimed.
           optimisticBuy.mutate(src.index);
         }
       }
@@ -295,6 +295,91 @@ export default function ShopPage() {
     return itemIndex[activeSource.itemId] ?? null;
   }, [activeSource, itemIndex]);
 
+  // Derived synergy data. `tagCounts` is the board's tag tally; the
+  // hovered-item tag set is what every section uses to cross-highlight
+  // matching cards.
+  const tagCounts = useMemo(() => countBoardTags(board, itemIndex), [board, itemIndex]);
+  const hoveredTags = useMemo<ReadonlySet<string>>(
+    () => (hoveredItemId ? tagsOfItem(hoveredItemId, itemIndex) : new Set()),
+    [hoveredItemId, itemIndex],
+  );
+
+  const sellBoard = useCallback(
+    (slot: number) => {
+      setErrorMessage(null);
+      optimisticSell.mutate({ location: "board", slot });
+    },
+    [optimisticSell],
+  );
+  const sellHand = useCallback(
+    (slot: number) => {
+      setErrorMessage(null);
+      optimisticSell.mutate({ location: "hand", slot });
+    },
+    [optimisticSell],
+  );
+
+  // Keyboard shortcuts. Stable callbacks make the dependency list small;
+  // most actions read live state directly off ref-like values (data.state,
+  // hoveredShopIndex).
+  const state = data?.state;
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.repeat) return;
+      const tgt = e.target;
+      if (
+        tgt instanceof HTMLInputElement ||
+        tgt instanceof HTMLTextAreaElement ||
+        (tgt instanceof HTMLElement && tgt.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (e.key === "?") {
+        e.preventDefault();
+        setShowHelp((s) => !s);
+        return;
+      }
+      if (e.key === "Escape") {
+        if (showHelp) {
+          e.preventDefault();
+          setShowHelp(false);
+        }
+        return;
+      }
+      if (showHelp) return;
+      if (!state) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "r") {
+        if (state.gold >= REFRESH_COST && !optimisticRefresh.isPending) {
+          e.preventDefault();
+          setErrorMessage(null);
+          optimisticRefresh.mutate(undefined);
+        }
+        return;
+      }
+      if (key === "f") {
+        if (hoveredShopIndex === null) return;
+        const slot = state.shop[hoveredShopIndex];
+        if (!slot?.itemId) return;
+        e.preventDefault();
+        setErrorMessage(null);
+        optimisticFreeze.mutate({ index: hoveredShopIndex, frozen: !slot.frozen });
+        return;
+      }
+      if (key === " " || e.code === "Space") {
+        if (combat.isPending) return;
+        e.preventDefault();
+        setErrorMessage(null);
+        combat.mutate();
+        return;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state, hoveredShopIndex, showHelp, optimisticRefresh, optimisticFreeze, combat]);
+
   if (isLoading || data === null || data === undefined || catalog.isLoading) {
     return <ShopSkeleton />;
   }
@@ -306,13 +391,13 @@ export default function ShopPage() {
     );
   }
 
-  const { run, state } = data;
+  const { run, state: runState } = data;
   const isDragging = activeSource !== null;
   const draggingShopIndex = activeSource?.kind === "shop" ? activeSource.index : null;
   const draggingHandSlot = activeSource?.kind === "hand" ? activeSource.slot : null;
   const draggingBoardSlot = activeSource?.kind === "board" ? activeSource.slot : null;
   const hero = HEROES.find((h) => h.id === run.heroId);
-  const maxHp = hero?.startingHp ?? Math.max(state.hp, 100);
+  const maxHp = hero?.startingHp ?? Math.max(runState.hp, 100);
 
   return (
     <DndContext
@@ -324,19 +409,19 @@ export default function ShopPage() {
       onDragCancel={onDragCancel}
     >
       <main className="flex min-h-screen flex-col gap-6 bg-slate-950 px-6 py-6 text-slate-50">
-        <DayTransition day={state.day} maxDay={MAX_DAY} />
+        <DayTransition day={runState.day} maxDay={MAX_DAY} />
         <RunStatusBanner
           heroName={hero?.name ?? run.heroId}
           runId={run.id}
-          day={state.day}
+          day={runState.day}
           maxDay={MAX_DAY}
-          hp={state.hp}
+          hp={runState.hp}
           maxHp={maxHp}
-          gold={state.gold}
-          nextDayGold={state.day < MAX_DAY ? dailyGoldFor(state.day + 1) : 0}
-          shopLevel={state.shopLevel}
-          xp={state.xp}
-          xpToLevel={xpThreshold(state.shopLevel)}
+          gold={runState.gold}
+          nextDayGold={runState.day < MAX_DAY ? dailyGoldFor(runState.day + 1) : 0}
+          shopLevel={runState.shopLevel}
+          xp={runState.xp}
+          xpToLevel={xpThreshold(runState.shopLevel)}
           maxShopLevel={MAX_SHOP_LEVEL}
           onStartCombat={() => {
             setErrorMessage(null);
@@ -348,26 +433,45 @@ export default function ShopPage() {
         />
 
         <BoardGrid
-          board={state.board}
+          board={runState.board}
           itemIndex={itemIndex}
           draggingFromSlot={draggingBoardSlot}
           hover={hover}
+          onSell={sellBoard}
+          onHoverItem={setHoveredItemId}
+          synergyTags={hoveredTags}
         />
 
-        <Bench hand={state.hand} itemIndex={itemIndex} draggingFromSlot={draggingHandSlot} />
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-900/30 px-4 py-2">
+          <h3 className="text-slate-300 text-xs uppercase tracking-wider">Board synergies</h3>
+          <SynergyPanel counts={tagCounts} highlightTags={hoveredTags} />
+        </section>
+
+        <Bench
+          hand={runState.hand}
+          itemIndex={itemIndex}
+          draggingFromSlot={draggingHandSlot}
+          onSell={sellHand}
+          onHoverItem={setHoveredItemId}
+          synergyTags={hoveredTags}
+        />
 
         <SellZone active={isDragging} />
 
         <div className="mt-auto flex w-full justify-end">
           <div className="w-full max-w-3xl">
             <ShopRow
-              shop={state.shop}
-              shopLevel={state.shopLevel}
-              xp={state.xp}
-              xpToLevel={xpThreshold(state.shopLevel)}
-              gold={state.gold}
+              shop={runState.shop}
+              shopLevel={runState.shopLevel}
+              xp={runState.xp}
+              xpToLevel={xpThreshold(runState.shopLevel)}
+              gold={runState.gold}
               itemIndex={itemIndex}
               draggingFromIndex={draggingShopIndex}
+              synergyTags={hoveredTags}
+              hoveredIndex={hoveredShopIndex}
+              refreshing={optimisticRefresh.isPending}
+              buyingXP={optimisticXP.isPending}
               onBuy={(index) => {
                 setErrorMessage(null);
                 optimisticBuy.mutate(index);
@@ -383,6 +487,15 @@ export default function ShopPage() {
               onXP={() => {
                 setErrorMessage(null);
                 optimisticXP.mutate(undefined);
+              }}
+              onSlotHoverChange={(idx) => {
+                setHoveredShopIndex(idx);
+                if (idx === null) {
+                  setHoveredItemId(null);
+                  return;
+                }
+                const id = runState.shop[idx]?.itemId ?? null;
+                setHoveredItemId(id);
               }}
               refreshCost={REFRESH_COST}
               xpCost={XP_COST}
@@ -402,6 +515,9 @@ export default function ShopPage() {
             {errorMessage}
           </motion.div>
         ) : null}
+
+        <HelpButton onOpen={() => setShowHelp(true)} />
+        <ShortcutsOverlay open={showHelp} onClose={() => setShowHelp(false)} />
       </main>
 
       <DragOverlay dropAnimation={null}>
@@ -412,6 +528,22 @@ export default function ShopPage() {
         ) : null}
       </DragOverlay>
     </DndContext>
+  );
+}
+
+function HelpButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title="Keyboard shortcuts (?)"
+      className="fixed right-4 bottom-4 z-40 flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-slate-200 text-xs shadow-lg backdrop-blur hover:border-amber-500 hover:text-amber-200"
+      aria-label="Keyboard shortcuts"
+    >
+      <Keyboard className="h-3.5 w-3.5" />
+      Shortcuts
+      <kbd className="rounded bg-slate-800 px-1 font-mono text-[0.65rem]">?</kbd>
+    </button>
   );
 }
 

@@ -1,7 +1,7 @@
 // Bench (hand) row. The bench is one big drop target — items dropped on
 // any bench cell go to the next free hand slot (the server appends). Each
 // bench card is a drag source so it can be moved to the board or onto the
-// sell zone.
+// sell zone. Right-clicking a bench card sells it directly.
 
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { ItemCard } from "@/components/game/ItemCard";
@@ -16,9 +16,22 @@ type Props = {
   itemIndex: Record<string, Item>;
   /** Hand slot of the item currently being dragged (so we can ghost it). */
   draggingFromSlot: number | null;
+  onSell?: (slot: number) => void;
+  /** Notified with the itemId of whichever bench card is hovered. */
+  onHoverItem?: (itemId: string | null) => void;
+  /** Tags belonging to the externally-hovered item (a shop card, typically).
+   *  Bench cards matching any of these get a synergy highlight. */
+  synergyTags?: ReadonlySet<string>;
 };
 
-export function Bench({ hand, itemIndex, draggingFromSlot }: Props) {
+export function Bench({
+  hand,
+  itemIndex,
+  draggingFromSlot,
+  onSell,
+  onHoverItem,
+  synergyTags,
+}: Props) {
   const { setNodeRef, isOver } = useDroppable({
     id: BENCH_DROP_ID,
     data: { kind: "bench" },
@@ -44,6 +57,7 @@ export function Bench({ hand, itemIndex, draggingFromSlot }: Props) {
           const item = itemIndex[h.itemId];
           if (!item) return null;
           const isSource = draggingFromSlot === h.slot;
+          const synergy = synergyTags ? item.tags.some((t) => synergyTags.has(t)) : false;
           const src: DragSource = {
             kind: "hand",
             slot: h.slot,
@@ -57,7 +71,14 @@ export function Bench({ hand, itemIndex, draggingFromSlot }: Props) {
               data={src}
               ghost={isSource}
             >
-              <ItemCard item={item} className="h-full" />
+              <ItemCard
+                item={item}
+                className="h-full"
+                sellPreview={item.sellValue}
+                synergyHighlight={synergy}
+                onContextMenu={onSell ? () => onSell(h.slot) : undefined}
+                onHoverChange={(hov) => onHoverItem?.(hov ? item.id : null)}
+              />
             </DraggableHandItem>
           );
         })}

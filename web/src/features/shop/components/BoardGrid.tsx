@@ -2,7 +2,8 @@
 // gridColumnStart + span. Each of the 10 cells is a dnd-kit droppable so the
 // page-level drag handler can route hand→board, board→board, and
 // shop→board drops to the right mutation. Items already on the board are
-// themselves draggable (board↔board reorder, board→bench, board→sell).
+// themselves draggable (board↔board reorder, board→bench, board→sell) and
+// can be right-clicked to sell.
 
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { ItemCard } from "@/components/game/ItemCard";
@@ -24,9 +25,21 @@ type Props = {
   draggingFromSlot: number | null;
   /** Highlight overlay describing the placement preview during drag. */
   hover: HoverState | null;
+  onSell?: (slot: number) => void;
+  onHoverItem?: (itemId: string | null) => void;
+  /** Tags of an externally-hovered item — board items matching any get a glow. */
+  synergyTags?: ReadonlySet<string>;
 };
 
-export function BoardGrid({ board, itemIndex, draggingFromSlot, hover }: Props) {
+export function BoardGrid({
+  board,
+  itemIndex,
+  draggingFromSlot,
+  hover,
+  onSell,
+  onHoverItem,
+  synergyTags,
+}: Props) {
   const cellsUsed = computeOccupancy(board, itemIndex);
 
   return (
@@ -70,6 +83,7 @@ export function BoardGrid({ board, itemIndex, draggingFromSlot, hover }: Props) 
           const item = itemIndex[b.itemId];
           if (!item) return null;
           const isSource = draggingFromSlot === b.slot;
+          const synergy = synergyTags ? item.tags.some((t) => synergyTags.has(t)) : false;
           const src: DragSource = {
             kind: "board",
             slot: b.slot,
@@ -85,7 +99,14 @@ export function BoardGrid({ board, itemIndex, draggingFromSlot, hover }: Props) 
               span={item.size}
               ghost={isSource}
             >
-              <ItemCard item={item} className="h-full" />
+              <ItemCard
+                item={item}
+                className="h-full"
+                sellPreview={item.sellValue}
+                synergyHighlight={synergy}
+                onContextMenu={onSell ? () => onSell(b.slot) : undefined}
+                onHoverChange={(hov) => onHoverItem?.(hov ? item.id : null)}
+              />
             </DraggableBoardItem>
           );
         })}
@@ -103,7 +124,6 @@ function BoardCell({ slot }: { slot: number }) {
     <div
       ref={setNodeRef}
       data-testid={`board-cell-${slot}`}
-      aria-label={`Board slot ${slot}`}
       style={{ gridColumn: `${slot + 1} / span 1`, gridRow: 1 }}
       className={cn(
         "rounded-md border-2 border-slate-800 border-dashed bg-slate-950/40 transition-colors",

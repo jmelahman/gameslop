@@ -6,7 +6,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { type LucideIcon, Beaker, Coins, HelpCircle, Shield, Sparkles, Swords } from "lucide-react";
-import { type ButtonHTMLAttributes, useState } from "react";
+import { type ButtonHTMLAttributes, type MouseEvent as ReactMouseEvent, useState } from "react";
 import { cn } from "@/lib/cn";
 import type { Item, Tier } from "@/types/game";
 
@@ -34,10 +34,22 @@ type Props = {
   costTone?: "buy" | "sell";
   disabled?: boolean;
   onClick?: () => void;
+  /** Right-click handler. When set the browser context menu is suppressed. */
+  onContextMenu?: () => void;
   /** When true, give the card a glow that signals it's active/frozen. */
   highlight?: boolean;
+  /** When true, render an icy overlay (used for frozen shop slots). */
+  frost?: boolean;
+  /** Emerald outline + glow signaling a tag synergy match. */
+  synergyHighlight?: boolean;
   /** Hide the hover tooltip (e.g. for tightly packed shop rows). */
   showTooltip?: boolean;
+  /** Shown in the tooltip footer as "Sell for Xg". When set, the tooltip's
+   *  default buy/sell summary line is replaced by the sell preview alone. */
+  sellPreview?: number;
+  /** Notified when the card hover state changes (used by ShopPage to track
+   *  the currently-hovered card for keyboard shortcuts and synergy hints). */
+  onHoverChange?: (hovered: boolean) => void;
   className?: string;
   buttonProps?: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick" | "disabled">;
 };
@@ -49,14 +61,31 @@ export function ItemCard({
   costTone = "buy",
   disabled,
   onClick,
+  onContextMenu,
   highlight,
+  frost,
+  synergyHighlight,
   showTooltip = true,
+  sellPreview,
+  onHoverChange,
   className,
   buttonProps,
 }: Props) {
   const [hovered, setHovered] = useState(false);
   const tier = TIER_COLORS[item.tier];
-  const slotWidth = item.size; // visual span (item-internal; ShopPage maps to grid)
+  const slotWidth = item.size;
+
+  const setHover = (h: boolean) => {
+    setHovered(h);
+    onHoverChange?.(h);
+  };
+
+  const handleContextMenu = onContextMenu
+    ? (e: ReactMouseEvent<HTMLButtonElement>) => {
+        e.preventDefault();
+        onContextMenu();
+      }
+    : undefined;
 
   return (
     <div className={cn("relative", className)} style={{ gridColumn: `span ${slotWidth}` }}>
@@ -64,16 +93,18 @@ export function ItemCard({
         {...buttonProps}
         type="button"
         onClick={onClick}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onFocus={() => setHovered(true)}
-        onBlur={() => setHovered(false)}
+        onContextMenu={handleContextMenu}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
         disabled={disabled}
         className={cn(
           "group relative flex h-full w-full flex-col items-stretch overflow-hidden rounded-md border border-slate-800 bg-slate-900/80 px-2 py-2 text-left transition-all",
           "ring-2",
           tier.ring,
           highlight && "shadow-[0_0_18px_rgba(56,189,248,0.35)]",
+          synergyHighlight && "ring-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.55)]",
           disabled
             ? "cursor-not-allowed opacity-50"
             : "cursor-pointer hover:-translate-y-0.5 hover:bg-slate-900",
@@ -105,11 +136,10 @@ export function ItemCard({
             {costLabel}
           </span>
         ) : null}
+
+        {frost ? <FrostOverlay /> : null}
       </button>
 
-      {/* Badge is rendered as a sibling of the card button (not a child), so
-          interactive badges like freeze/sell can themselves be <button>s
-          without producing nested-button hydration errors. */}
       {badge ? (
         <span className="pointer-events-auto absolute top-1 right-1 z-10">{badge}</span>
       ) : null}
@@ -128,13 +158,54 @@ export function ItemCard({
             <p className="mt-1 capitalize text-slate-400">
               {item.tier} · size {item.size} · {item.tags.join(", ") || "no tags"}
             </p>
-            <p className="mt-2 text-slate-300">
-              Buy {item.buyCost}g · Sell {item.sellValue}g
-            </p>
+            {sellPreview !== undefined ? (
+              <p className="mt-2 flex items-center gap-1 text-emerald-300">
+                <Coins className="h-3 w-3" />
+                Sell for {sellPreview}g<span className="ml-1 text-slate-500">(right-click)</span>
+              </p>
+            ) : (
+              <p className="mt-2 text-slate-300">
+                Buy {item.buyCost}g · Sell {item.sellValue}g
+              </p>
+            )}
           </motion.div>
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+// FrostOverlay — translucent icy crystal pattern with subtle pulse, layered
+// over a frozen shop card. Pointer-events-none so the card body still
+// receives clicks/drags.
+function FrostOverlay() {
+  return (
+    <span
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded-md"
+      aria-hidden="true"
+    >
+      <motion.span
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(circle at 30% 20%, rgba(186,230,253,0.45), transparent 55%), radial-gradient(circle at 75% 70%, rgba(165,243,252,0.4), transparent 60%), linear-gradient(135deg, rgba(56,189,248,0.18), rgba(8,47,73,0.15))",
+        }}
+        animate={{ opacity: [0.7, 0.95, 0.7] }}
+        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <span
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(60deg, rgba(186,230,253,0.18) 0 1px, transparent 1px 8px), repeating-linear-gradient(-60deg, rgba(186,230,253,0.14) 0 1px, transparent 1px 12px)",
+          mixBlendMode: "screen",
+        }}
+      />
+      <span
+        className="absolute inset-0 rounded-md border border-cyan-200/50"
+        style={{ boxShadow: "inset 0 0 18px rgba(125,211,252,0.45)" }}
+      />
+    </span>
   );
 }
 
