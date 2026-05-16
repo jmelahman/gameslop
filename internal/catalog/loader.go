@@ -20,6 +20,28 @@ type Catalog struct {
 	Heroes map[string]model.HeroDef
 }
 
+// Item looks up a single item by id. Implements the shop.Catalog interface.
+func (c *Catalog) Item(id string) (model.ItemDef, bool) {
+	if c == nil {
+		return model.ItemDef{}, false
+	}
+	d, ok := c.Items[id]
+	return d, ok
+}
+
+// All returns a snapshot of every item in catalog order-stable iteration order.
+// Used by the shop roller to filter by tier.
+func (c *Catalog) All() []model.ItemDef {
+	if c == nil {
+		return nil
+	}
+	out := make([]model.ItemDef, 0, len(c.Items))
+	for _, v := range c.Items {
+		out = append(out, v)
+	}
+	return out
+}
+
 // Load reads every embedded item and hero JSON file, decodes it into
 // model structs, and upserts a row per entry into the corresponding catalog
 // table via INSERT OR IGNORE. The decoded data is also returned in-memory.

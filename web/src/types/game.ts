@@ -6,10 +6,35 @@ import type {
   RunStatus,
   WireActiveRun,
   WireBoardItem,
+  WireItem,
   WireRun,
   WireRunState,
   WireShopItem,
 } from "./api";
+
+export type Tier = "bronze" | "silver" | "gold" | "diamond";
+
+export type Item = {
+  id: string;
+  name: string;
+  tier: Tier;
+  size: number;
+  tags: string[];
+  buyCost: number;
+  sellValue: number;
+};
+
+export function toDomainItem(w: WireItem): Item {
+  return {
+    id: w.id,
+    name: w.name,
+    tier: w.tier,
+    size: w.size,
+    tags: w.tags,
+    buyCost: w.buy_cost,
+    sellValue: w.sell_value,
+  };
+}
 
 export type { RunStatus };
 
@@ -40,6 +65,7 @@ export type RunState = {
   hp: number;
   shopLevel: number;
   xp: number;
+  shopRolls: number;
   shop: ShopItem[];
   hand: BoardItem[];
   board: BoardItem[];
@@ -79,6 +105,7 @@ export function toDomainRunState(w: WireRunState): RunState {
     hp: w.hp,
     shopLevel: w.shop_level,
     xp: w.xp,
+    shopRolls: w.shop_rolls,
     shop: w.shop.map(toDomainShopItem),
     hand: w.hand.map(toDomainBoardItem),
     board: w.board.map(toDomainBoardItem),

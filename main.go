@@ -32,7 +32,7 @@ func main() {
 
 	deps := api.Deps{
 		Catalog: cat,
-		Runs:    store.NewRunStore(database),
+		Runs:    store.NewRunStore(database, cat),
 	}
 
 	mux := http.NewServeMux()

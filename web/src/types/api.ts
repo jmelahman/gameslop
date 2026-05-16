@@ -31,10 +31,21 @@ export type WireRunState = {
   hp: number;
   shop_level: number;
   xp: number;
+  shop_rolls: number;
   shop: WireShopItem[];
   hand: WireBoardItem[];
   board: WireBoardItem[];
   updated_at: number;
+};
+
+export type WireItem = {
+  id: string;
+  name: string;
+  tier: "bronze" | "silver" | "gold" | "diamond";
+  size: number;
+  tags: string[];
+  buy_cost: number;
+  sell_value: number;
 };
 
 export type WireActiveRun = {

@@ -10,7 +10,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jmelahman/gameslop/internal/catalog"
 	"github.com/jmelahman/gameslop/internal/model"
+	"github.com/jmelahman/gameslop/internal/shop"
 )
 
 // ErrActiveRunExists is returned by Create when the player already has an
@@ -25,11 +27,14 @@ var ErrUnknownHero = errors.New("unknown hero")
 
 // RunStore wraps SQL access for runs + run_state.
 type RunStore struct {
-	db *sql.DB
+	db  *sql.DB
+	cat *catalog.Catalog
 }
 
-// NewRunStore wraps db.
-func NewRunStore(db *sql.DB) *RunStore { return &RunStore{db: db} }
+// NewRunStore wraps db. Catalog is used to seed the initial shop on Create.
+func NewRunStore(db *sql.DB, cat *catalog.Catalog) *RunStore {
+	return &RunStore{db: db, cat: cat}
+}
 
 // Create starts a new run for the player using the given hero. Fails with
 // ErrActiveRunExists if one is already in progress.
@@ -89,20 +94,21 @@ func (s *RunStore) Create(ctx context.Context, playerID int64, heroID string) (*
 		HP:        startingHP,
 		ShopLevel: 1,
 		XP:        0,
-		Shop:      []model.ShopItem{},
+		ShopRolls: 0,
 		Hand:      []model.BoardItem{},
 		Board:     []model.BoardItem{},
 		UpdatedAt: now,
 	}
+	state.Shop = shop.Roll(s.cat, seed, state.Day, state.ShopRolls, state.ShopLevel, nil)
 	shopJSON, _ := json.Marshal(state.Shop)
 	handJSON, _ := json.Marshal(state.Hand)
 	boardJSON, _ := json.Marshal(state.Board)
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO run_state
-			(run_id, day, gold, hp, shop_level, xp, shop_json, hand_json, board_json, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		state.RunID, state.Day, state.Gold, state.HP, state.ShopLevel, state.XP,
+			(run_id, day, gold, hp, shop_level, xp, shop_rolls, shop_json, hand_json, board_json, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		state.RunID, state.Day, state.Gold, state.HP, state.ShopLevel, state.XP, state.ShopRolls,
 		string(shopJSON), string(handJSON), string(boardJSON), state.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -147,9 +153,9 @@ func (s *RunStore) Active(ctx context.Context, playerID int64) (*model.ActiveRun
 	state := model.RunState{}
 	var shopJSON, handJSON, boardJSON string
 	err = s.db.QueryRowContext(ctx, `
-		SELECT run_id, day, gold, hp, shop_level, xp, shop_json, hand_json, board_json, updated_at
+		SELECT run_id, day, gold, hp, shop_level, xp, shop_rolls, shop_json, hand_json, board_json, updated_at
 		FROM run_state WHERE run_id = ?`, run.ID,
-	).Scan(&state.RunID, &state.Day, &state.Gold, &state.HP, &state.ShopLevel, &state.XP,
+	).Scan(&state.RunID, &state.Day, &state.Gold, &state.HP, &state.ShopLevel, &state.XP, &state.ShopRolls,
 		&shopJSON, &handJSON, &boardJSON, &state.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("load run_state for run %d: %w", run.ID, err)
@@ -165,6 +171,44 @@ func (s *RunStore) Active(ctx context.Context, playerID int64) (*model.ActiveRun
 	}
 
 	return &model.ActiveRun{Run: run, State: state}, nil
+}
+
+// UpdateState persists the mutable run_state row, refreshing updated_at.
+// Returns ErrNoActiveRun if no row exists for the given run_id.
+func (s *RunStore) UpdateState(ctx context.Context, state *model.RunState) error {
+	state.UpdatedAt = time.Now().Unix()
+	shopJSON, err := json.Marshal(state.Shop)
+	if err != nil {
+		return err
+	}
+	handJSON, err := json.Marshal(state.Hand)
+	if err != nil {
+		return err
+	}
+	boardJSON, err := json.Marshal(state.Board)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE run_state SET
+			day = ?, gold = ?, hp = ?, shop_level = ?, xp = ?, shop_rolls = ?,
+			shop_json = ?, hand_json = ?, board_json = ?, updated_at = ?
+		WHERE run_id = ?`,
+		state.Day, state.Gold, state.HP, state.ShopLevel, state.XP, state.ShopRolls,
+		string(shopJSON), string(handJSON), string(boardJSON), state.UpdatedAt,
+		state.RunID,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNoActiveRun
+	}
+	return nil
 }
 
 // Abandon marks the player's active run as abandoned. Returns ErrNoActiveRun

@@ -41,6 +41,7 @@ type RunState struct {
 	HP        int         `json:"hp"`
 	ShopLevel int         `json:"shop_level"`
 	XP        int         `json:"xp"`
+	ShopRolls int         `json:"shop_rolls"`
 	Shop      []ShopItem  `json:"shop"`
 	Hand      []BoardItem `json:"hand"`
 	Board     []BoardItem `json:"board"`
