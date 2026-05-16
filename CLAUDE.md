@@ -67,3 +67,15 @@ bundled Chromium under `$PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`.
 - `web/static.go` — default build, placeholder handler.
 - `web/static_embed.go` — `-tags embed`, embeds `web/dist` and serves the
   SPA with index.html fallback for client-side routes.
+
+## Plans
+
+Plan-mode artifacts go to `/workspace/plans/<slug>.md` and are **committed to
+git** (the directory is no longer gitignored). This is how plans survive across
+kanban worktrees — when a new ticket spawns a fresh worktree, `git checkout`
+brings the plans with it.
+
+When you finish writing or revising a plan, commit it (typically alongside the
+work that implements it, or in a standalone "add plan" commit on the planning
+branch). If you start a new ticket that depends on an existing plan, just read
+it from `plans/<slug>.md` like any other file.

@@ -22,7 +22,6 @@ go.work.sum
 .env
 
 # Local planning artifacts
-plans/
 .playwright-mcp/
 .tmp/
 
