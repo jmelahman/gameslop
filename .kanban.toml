@@ -1,0 +1,7 @@
+[[task]]
+label = "Backend"
+container_port = 7474
+
+[[task]]
+label = "Frontend"
+container_port = 5173
