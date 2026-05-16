@@ -82,6 +82,28 @@ func (h *shopHandler) remove(w http.ResponseWriter, r *http.Request) {
 	h.persistAndWrite(w, r, ra)
 }
 
+type enchantRequest struct {
+	BoardSlot     int    `json:"board_slot"`
+	EnchantmentID string `json:"enchantment_id"`
+}
+
+func (h *shopHandler) enchant(w http.ResponseWriter, r *http.Request) {
+	var req enchantRequest
+	if err := decodeBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	ra, ok := h.loadActive(w, r)
+	if !ok {
+		return
+	}
+	if err := shop.Enchant(&ra.State, h.deps.Catalog, req.BoardSlot, req.EnchantmentID); err != nil {
+		writeShopError(w, err)
+		return
+	}
+	h.persistAndWrite(w, r, ra)
+}
+
 type sellRequest struct {
 	Location string `json:"location"`
 	Slot     int    `json:"slot"`

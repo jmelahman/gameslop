@@ -4,6 +4,7 @@
 // the pure reducer.
 
 import { useEffect, useReducer } from "react";
+import { useSettingsStore } from "@/store/settingsStore";
 import type { TickEvent } from "@/types/game";
 import { initialReplayState, replayReducer } from "./replay";
 
@@ -12,10 +13,16 @@ import { initialReplayState, replayReducer } from "./replay";
 const BASE_TICK_MS = 100;
 
 export function useReplay(ticks: TickEvent[]) {
-  const [state, dispatch] = useReducer(replayReducer, initialReplayState);
+  const persistedSpeed = useSettingsStore((s) => s.playbackSpeed);
+  const setPersistedSpeed = useSettingsStore((s) => s.setPlaybackSpeed);
+  const [state, dispatch] = useReducer(replayReducer, initialReplayState, (init) => ({
+    ...init,
+    speed: persistedSpeed,
+  }));
 
-  // Re-load whenever the tick log identity changes (new fight).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: dispatch is stable.
+  // Re-load whenever the tick log identity changes (new fight). The reducer's
+  // LOAD case preserves the existing speed, so the persisted preference flows
+  // through naturally on the first mount.
   useEffect(() => {
     dispatch({ type: "LOAD", ticks });
   }, [ticks]);
@@ -28,6 +35,14 @@ export function useReplay(ticks: TickEvent[]) {
     const id = setInterval(() => dispatch({ type: "ADVANCE" }), stepMs);
     return () => clearInterval(id);
   }, [state.status, state.speed]);
+
+  // Mirror in-fight speed back to the settings store so the user's choice
+  // sticks across pages and reloads.
+  useEffect(() => {
+    if (state.speed === 1 || state.speed === 2 || state.speed === 4) {
+      setPersistedSpeed(state.speed);
+    }
+  }, [state.speed, setPersistedSpeed]);
 
   return { state, dispatch };
 }

@@ -1,0 +1,94 @@
+[
+  {
+    "id": "dragonbone_blade",
+    "name": "Dragonbone Blade",
+    "tier": "diamond",
+    "size": 2,
+    "tags": ["Weapon"],
+    "buy_cost": 12,
+    "sell_value": 5,
+    "enchantable": true,
+    "enchantment_slots": 2,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 2200,
+        "effects": [
+          { "op": "damage", "target": "opponent_random", "value": 16 },
+          { "op": "burn",   "target": "opponent_random", "value": 2 }
+        ]
+      },
+      {
+        "type": "on_kill",
+        "effects": [
+          { "op": "gain_gold", "target": "self_player", "value": 3 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "phoenix_feather",
+    "name": "Phoenix Feather",
+    "tier": "diamond",
+    "size": 1,
+    "tags": ["Trinket"],
+    "buy_cost": 10,
+    "sell_value": 5,
+    "triggers": [
+      {
+        "type": "on_take_damage",
+        "effects": [
+          { "op": "heal", "target": "self_player", "value": 4 }
+        ]
+      },
+      {
+        "type": "at_fight_start",
+        "effects": [
+          { "op": "shield", "target": "self_player", "value": 10 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "tempest_ring",
+    "name": "Tempest Ring",
+    "tier": "diamond",
+    "size": 1,
+    "tags": ["Magic"],
+    "buy_cost": 10,
+    "sell_value": 5,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 4000,
+        "effects": [
+          { "op": "haste", "target": "self_all_weapons", "value": 50, "duration_ms": 1500 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lightning_rod",
+    "name": "Lightning Rod",
+    "tier": "diamond",
+    "size": 1,
+    "tags": ["Magic"],
+    "buy_cost": 11,
+    "sell_value": 5,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 2500,
+        "effects": [
+          { "op": "damage", "target": "opponent_all", "value": 6 }
+        ]
+      },
+      {
+        "type": "when_adjacent_fires",
+        "effects": [
+          { "op": "damage", "target": "opponent_random", "value": 1 }
+        ]
+      }
+    ]
+  }
+]

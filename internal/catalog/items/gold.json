@@ -1,0 +1,129 @@
+[
+  {
+    "id": "golden_blade",
+    "name": "Golden Blade",
+    "tier": "gold",
+    "size": 1,
+    "tags": ["Weapon"],
+    "buy_cost": 7,
+    "sell_value": 3,
+    "enchantable": true,
+    "enchantment_slots": 1,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 2500,
+        "effects": [
+          { "op": "damage", "target": "opponent_random", "value": 10 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "battle_standard",
+    "name": "Battle Standard",
+    "tier": "gold",
+    "size": 2,
+    "tags": ["Banner"],
+    "buy_cost": 7,
+    "sell_value": 3,
+    "triggers": [
+      {
+        "type": "at_fight_start",
+        "effects": [
+          { "op": "buff", "target": "self_all_weapons", "value": 2 }
+        ]
+      },
+      {
+        "type": "when_adjacent_fires",
+        "effects": [
+          { "op": "haste", "target": "self_adjacent", "value": 25, "duration_ms": 800 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "vampiric_dagger",
+    "name": "Vampiric Dagger",
+    "tier": "gold",
+    "size": 1,
+    "tags": ["Weapon"],
+    "buy_cost": 7,
+    "sell_value": 3,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 2000,
+        "effects": [
+          { "op": "damage", "target": "opponent_random", "value": 5 },
+          { "op": "heal",   "target": "self_player",     "value": 2 }
+        ]
+      },
+      {
+        "type": "on_kill",
+        "effects": [
+          { "op": "gain_gold", "target": "self_player", "value": 1 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "bulwark",
+    "name": "Bulwark",
+    "tier": "gold",
+    "size": 2,
+    "tags": ["Shield"],
+    "buy_cost": 7,
+    "sell_value": 3,
+    "triggers": [
+      {
+        "type": "at_fight_start",
+        "effects": [
+          { "op": "shield", "target": "self_player", "value": 15 }
+        ]
+      },
+      {
+        "type": "cooldown",
+        "cooldown_ms": 4000,
+        "effects": [
+          { "op": "shield", "target": "self_player", "value": 5 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "plague_censer",
+    "name": "Plague Censer",
+    "tier": "gold",
+    "size": 1,
+    "tags": ["Magic"],
+    "buy_cost": 6,
+    "sell_value": 3,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 3000,
+        "effects": [
+          { "op": "poison", "target": "opponent_all", "value": 2 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "cards_of_fortune",
+    "name": "Cards of Fortune",
+    "tier": "gold",
+    "size": 1,
+    "tags": ["Trinket"],
+    "buy_cost": 6,
+    "sell_value": 3,
+    "triggers": [
+      {
+        "type": "at_fight_start",
+        "effects": [
+          { "op": "draw_item", "target": "self_player", "value": 1 }
+        ]
+      }
+    ]
+  }
+]

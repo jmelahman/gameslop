@@ -38,9 +38,11 @@ func Register(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /api/runs/active/board/move", sh.move)
 	mux.HandleFunc("POST /api/runs/active/board/remove", sh.remove)
 	mux.HandleFunc("POST /api/runs/active/items/sell", sh.sell)
+	mux.HandleFunc("POST /api/runs/active/items/enchant", sh.enchant)
 
 	mux.HandleFunc("POST /api/runs/active/combat/start", ch.start)
 	mux.HandleFunc("GET /api/runs/active/combat/result", ch.result)
 
 	mux.HandleFunc("GET /api/catalog/items", sh.catalogItems)
+	mux.HandleFunc("GET /api/catalog/enchantments", sh.catalogEnchantments)
 }

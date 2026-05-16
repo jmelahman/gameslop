@@ -137,6 +137,28 @@ func (h *shopHandler) catalogItems(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// catalogEnchantments exposes the static enchantment catalog. Read-only.
+func (h *shopHandler) catalogEnchantments(w http.ResponseWriter, r *http.Request) {
+	enchs := h.deps.Catalog.AllEnchantments()
+	type wireEnch struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Description string   `json:"description"`
+		AppliesTo   []string `json:"applies_to"`
+	}
+	out := make([]wireEnch, 0, len(enchs))
+	for _, e := range enchs {
+		applies := e.AppliesTo
+		if applies == nil {
+			applies = []string{}
+		}
+		out = append(out, wireEnch{
+			ID: e.ID, Name: e.Name, Description: e.Description, AppliesTo: applies,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func writeShopError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, shop.ErrInsufficientGold):
@@ -153,6 +175,14 @@ func writeShopError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "board_full", err.Error())
 	case errors.Is(err, shop.ErrShopLevelMax):
 		writeError(w, http.StatusBadRequest, "shop_level_max", err.Error())
+	case errors.Is(err, shop.ErrUnknownEnchantment):
+		writeError(w, http.StatusBadRequest, "unknown_enchantment", err.Error())
+	case errors.Is(err, shop.ErrItemNotEnchantable):
+		writeError(w, http.StatusBadRequest, "not_enchantable", err.Error())
+	case errors.Is(err, shop.ErrEnchantmentSlotFull):
+		writeError(w, http.StatusBadRequest, "enchantment_slot_full", err.Error())
+	case errors.Is(err, shop.ErrEnchantmentTagMatch):
+		writeError(w, http.StatusBadRequest, "enchantment_tag_mismatch", err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 	}

@@ -41,3 +41,16 @@ type ItemDef struct {
 	EnchantmentSlots int             `json:"enchantment_slots,omitempty"`
 	Raw              json.RawMessage `json:"-"`
 }
+
+// Enchantment is a small bundle of additional triggers that can be merged
+// onto an existing ItemDef at combat-build time. Enchantments are picked
+// up from a static in-code catalog (see internal/catalog/enchantments.go).
+type Enchantment struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	// AppliesTo is an optional tag filter; an enchantment with `["Weapon"]`
+	// can only be applied to items carrying that tag.
+	AppliesTo []string  `json:"applies_to,omitempty"`
+	Triggers  []Trigger `json:"triggers"`
+}

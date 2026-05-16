@@ -22,9 +22,12 @@ type Run struct {
 }
 
 // BoardItem is an item placed on the player's board (or bench) during a run.
+// Enchantments lists the IDs of enchantments applied via POST /items/enchant;
+// they are merged into the item's trigger list at combat-build time.
 type BoardItem struct {
-	ItemID string `json:"item_id"`
-	Slot   int    `json:"slot"`
+	ItemID       string   `json:"item_id"`
+	Slot         int      `json:"slot"`
+	Enchantments []string `json:"enchantments,omitempty"`
 }
 
 // ShopItem is a slot in the current shop offering.

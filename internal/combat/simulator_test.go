@@ -17,6 +17,13 @@ func (f fakeCatalog) Item(id string) (model.ItemDef, bool) {
 	return d, ok
 }
 
+// fakeCatalog has no enchantments — every test that exercises combat below
+// uses raw item triggers; enchantment merging is covered in dedicated tests
+// against the real catalog.
+func (f fakeCatalog) Enchantment(id string) (model.Enchantment, bool) {
+	return model.Enchantment{}, false
+}
+
 // damager builds an item def whose only trigger is a cooldown that deals
 // `dmg` damage to a random opponent target.
 func damager(id string, cooldownMs, dmg int) model.ItemDef {

@@ -43,15 +43,19 @@ func XPThreshold(level int) (int, bool) {
 // Static errors returned by mutation helpers; the api layer maps each to a
 // specific HTTP code via errors.Is.
 var (
-	ErrInsufficientGold = errors.New("insufficient gold")
-	ErrInvalidShopIndex = errors.New("invalid shop index")
-	ErrEmptyShopSlot    = errors.New("shop slot already empty")
-	ErrInvalidHandSlot  = errors.New("invalid hand slot")
-	ErrInvalidBoardSlot = errors.New("invalid board slot")
-	ErrUnknownItem      = errors.New("unknown item id")
-	ErrBoardFull        = errors.New("not enough contiguous board space")
-	ErrShopLevelMax     = errors.New("shop already at max level")
-	ErrInvalidLocation  = errors.New("location must be 'board' or 'hand'")
+	ErrInsufficientGold    = errors.New("insufficient gold")
+	ErrInvalidShopIndex    = errors.New("invalid shop index")
+	ErrEmptyShopSlot       = errors.New("shop slot already empty")
+	ErrInvalidHandSlot     = errors.New("invalid hand slot")
+	ErrInvalidBoardSlot    = errors.New("invalid board slot")
+	ErrUnknownItem         = errors.New("unknown item id")
+	ErrBoardFull           = errors.New("not enough contiguous board space")
+	ErrShopLevelMax        = errors.New("shop already at max level")
+	ErrInvalidLocation     = errors.New("location must be 'board' or 'hand'")
+	ErrUnknownEnchantment  = errors.New("unknown enchantment id")
+	ErrItemNotEnchantable  = errors.New("item is not enchantable")
+	ErrEnchantmentSlotFull = errors.New("no free enchantment slot")
+	ErrEnchantmentTagMatch = errors.New("enchantment tag mismatch")
 )
 
 // Catalog is the read-only item lookup the shop layer needs. The full catalog
@@ -59,6 +63,14 @@ var (
 // of that dependency.
 type Catalog interface {
 	Item(id string) (model.ItemDef, bool)
+}
+
+// EnchantCatalog adds enchantment lookup on top of Catalog. Only the enchant
+// path requires it, so the rest of the shop API still uses the smaller
+// Catalog interface — keeps test fakes minimal.
+type EnchantCatalog interface {
+	Catalog
+	Enchantment(id string) (model.Enchantment, bool)
 }
 
 // slotConfig maps shop_level → (slots, tier-weights[bronze,silver,gold,diamond]).
@@ -318,8 +330,9 @@ func RemoveFromBoard(state *model.RunState, boardSlot int) error {
 	return nil
 }
 
-// Sell removes the item at the given location/slot, refunding SellValue gold.
-// location must be "board" or "hand".
+// Sell removes the item at the given location/slot, refunding SellValue gold
+// and resolving any on_sell triggers attached to the item def. location must
+// be "board" or "hand".
 func Sell(state *model.RunState, cat Catalog, location string, slot int) error {
 	switch location {
 	case "board":
@@ -333,6 +346,7 @@ func Sell(state *model.RunState, cat Catalog, location string, slot int) error {
 		}
 		state.Board = append(state.Board[:idx], state.Board[idx+1:]...)
 		state.Gold += def.SellValue
+		applyOnSell(state, def)
 		return nil
 	case "hand":
 		if slot < 0 || slot >= len(state.Hand) {
@@ -345,9 +359,75 @@ func Sell(state *model.RunState, cat Catalog, location string, slot int) error {
 		state.Hand = removeAt(state.Hand, slot)
 		state.Hand = compactHand(state.Hand)
 		state.Gold += def.SellValue
+		applyOnSell(state, def)
 		return nil
 	default:
 		return ErrInvalidLocation
+	}
+}
+
+// Enchant attaches an enchantment to a board item. Validates that the item
+// is enchantable, has a free slot, and the enchantment's AppliesTo (if set)
+// matches one of the item's tags.
+func Enchant(state *model.RunState, cat EnchantCatalog, boardSlot int, enchantmentID string) error {
+	idx := findBoardIndex(state.Board, boardSlot)
+	if idx < 0 {
+		return ErrInvalidBoardSlot
+	}
+	def, ok := cat.Item(state.Board[idx].ItemID)
+	if !ok {
+		return ErrUnknownItem
+	}
+	if !def.Enchantable {
+		return ErrItemNotEnchantable
+	}
+	ench, ok := cat.Enchantment(enchantmentID)
+	if !ok {
+		return ErrUnknownEnchantment
+	}
+	if !enchantmentMatchesTags(ench, def.Tags) {
+		return ErrEnchantmentTagMatch
+	}
+	slots := def.EnchantmentSlots
+	if slots < 1 {
+		slots = 1
+	}
+	if len(state.Board[idx].Enchantments) >= slots {
+		return ErrEnchantmentSlotFull
+	}
+	state.Board[idx].Enchantments = append(state.Board[idx].Enchantments, enchantmentID)
+	return nil
+}
+
+func enchantmentMatchesTags(ench model.Enchantment, itemTags []string) bool {
+	if len(ench.AppliesTo) == 0 {
+		return true
+	}
+	tagSet := map[string]struct{}{}
+	for _, t := range itemTags {
+		tagSet[t] = struct{}{}
+	}
+	for _, t := range ench.AppliesTo {
+		if _, ok := tagSet[t]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// applyOnSell walks the def's on_sell triggers. Out-of-combat effects are
+// limited to gain_gold for now (the only one with a meaningful state change
+// before combat starts); other ops are silently ignored.
+func applyOnSell(state *model.RunState, def model.ItemDef) {
+	for _, trig := range def.Triggers {
+		if trig.Type != "on_sell" {
+			continue
+		}
+		for _, eff := range trig.Effects {
+			if eff.Op == "gain_gold" {
+				state.Gold += eff.Value
+			}
+		}
 	}
 }
 
