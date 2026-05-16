@@ -23,7 +23,7 @@
       "label": "Gameslop Backend",
       "type": "shell",
       "command": "wgo",
-      "args": ["-file", "\\.go$", "run", "."],
+      "args": ["run", "."],
       "options": {
         "cwd": "${workspaceFolder}"
       }
