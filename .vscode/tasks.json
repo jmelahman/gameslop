@@ -22,10 +22,19 @@
     {
       "label": "Gameslop Backend",
       "type": "shell",
-      "command": "go",
-      "args": ["run", "."],
+      "command": "wgo",
+      "args": ["-file", "\\.go$", "run", "."],
       "options": {
         "cwd": "${workspaceFolder}"
+      }
+    },
+    {
+      "label": "Gameslop Frontend",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev", "--", "--host", "0.0.0.0"],
+      "options": {
+        "cwd": "${workspaceFolder}/web"
       }
     }
   ]

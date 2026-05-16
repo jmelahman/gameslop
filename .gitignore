@@ -36,3 +36,9 @@ plans/
 
 # release artifacts
 /gameslop
+
+# frontend
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+web/*.tsbuildinfo

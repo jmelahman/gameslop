@@ -34,3 +34,9 @@ repos:
           - --strict-ignore
           - --additional-pattern
           - ^sk-[A-Za-z0-9_\-]{20,}$
+      - id: biome
+        name: biome
+        entry: bash -c 'cd web && npx --no-install biome check --write --no-errors-on-unmatched --files-ignore-unknown=true "$@"' --
+        language: system
+        files: ^web/.*\.(ts|tsx|js|jsx|json)$
+        exclude: ^web/(node_modules|dist)/
