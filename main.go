@@ -41,7 +41,10 @@ func main() {
 	api.Register(mux, deps)
 	mux.Handle("/", web.Handler())
 
-	addr := ":7474"
+	addr := os.Getenv("GAMESLOP_ADDR")
+	if addr == "" {
+		addr = ":7474"
+	}
 	log.Printf("listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)

@@ -54,3 +54,7 @@ web/node_modules/
 web/dist/*
 !web/dist/.gitkeep
 web/*.tsbuildinfo
+
+# playwright artifacts
+web/playwright-report/
+web/test-results/
