@@ -13,6 +13,9 @@ import { type DragSource, sourceId } from "../dnd";
 type Props = {
   shop: ShopItem[];
   shopLevel: number;
+  xp: number;
+  /** XP needed to reach next level, or null when at max level. */
+  xpToLevel: number | null;
   gold: number;
   itemIndex: Record<string, Item>;
   pendingShopIndex?: number | null;
@@ -30,6 +33,8 @@ type Props = {
 export function ShopRow({
   shop,
   shopLevel,
+  xp,
+  xpToLevel,
   gold,
   itemIndex,
   pendingShopIndex,
@@ -42,10 +47,20 @@ export function ShopRow({
   xpCost,
   maxShopLevel,
 }: Props) {
+  const atMaxLevel = shopLevel >= maxShopLevel;
   return (
     <section className="w-full rounded-lg border border-slate-800 bg-slate-900/40 p-3">
       <header className="mb-2 flex items-baseline justify-between text-slate-300 text-xs uppercase tracking-wider">
-        <span>Shop · Lv {shopLevel}</span>
+        <span className="flex items-center gap-2">
+          Shop · Lv {shopLevel}
+          {atMaxLevel || xpToLevel === null ? (
+            <span className="text-emerald-300/70">(max)</span>
+          ) : (
+            <span className="font-mono text-slate-400 normal-case">
+              {xp}/{xpToLevel} XP
+            </span>
+          )}
+        </span>
         <div className="flex items-center gap-2">
           <button
             type="button"

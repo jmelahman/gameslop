@@ -34,6 +34,7 @@ func main() {
 		Catalog:    cat,
 		Runs:       store.NewRunStore(database, cat),
 		Encounters: store.NewEncounterStore(database),
+		History:    store.NewHistoryStore(database),
 	}
 
 	mux := http.NewServeMux()

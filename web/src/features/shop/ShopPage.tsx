@@ -26,7 +26,6 @@ import {
 } from "@dnd-kit/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Coins, Heart, Sparkles, Swords } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
@@ -43,19 +42,27 @@ import {
   sellItem,
 } from "@/api/shop";
 import { ItemCard } from "@/components/game/ItemCard";
+import { HEROES } from "@/features/hero-select/heroes";
 import { useCatalog, useItemIndex } from "@/hooks/useCatalog";
 import { RUN_QUERY_KEY, useRun } from "@/hooks/useRun";
+import {
+  MAX_DAY,
+  MAX_SHOP_LEVEL,
+  REFRESH_COST,
+  XP_COST,
+  dailyGoldFor,
+  xpThreshold,
+} from "@/lib/progression";
 import { useRunStore } from "@/store/runStore";
 import type { ActiveRun, BoardItem, Item } from "@/types/game";
 import { Bench } from "./components/Bench";
 import { BoardGrid } from "./components/BoardGrid";
+import { DayTransition } from "./components/DayTransition";
+import { RunStatusBanner } from "./components/RunStatusBanner";
 import { SellZone } from "./components/SellZone";
 import { ShopRow } from "./components/ShopRow";
 import { boardRangeFree, type DragSource, type DropTarget } from "./dnd";
 
-const REFRESH_COST = 1;
-const XP_COST = 4;
-const MAX_SHOP_LEVEL = 4;
 const INVALID_FLASH_MS = 350;
 
 type HoverState = {
@@ -304,6 +311,8 @@ export default function ShopPage() {
   const draggingShopIndex = activeSource?.kind === "shop" ? activeSource.index : null;
   const draggingHandSlot = activeSource?.kind === "hand" ? activeSource.slot : null;
   const draggingBoardSlot = activeSource?.kind === "board" ? activeSource.slot : null;
+  const hero = HEROES.find((h) => h.id === run.heroId);
+  const maxHp = hero?.startingHp ?? Math.max(state.hp, 100);
 
   return (
     <DndContext
@@ -315,45 +324,28 @@ export default function ShopPage() {
       onDragCancel={onDragCancel}
     >
       <main className="flex min-h-screen flex-col gap-6 bg-slate-950 px-6 py-6 text-slate-50">
-        <header className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-3">
-          <div className="flex items-center gap-3">
-            <Sparkles className="h-5 w-5 text-amber-400" />
-            <div>
-              <p className="font-semibold capitalize text-lg leading-tight">{run.heroId}</p>
-              <p className="text-slate-400 text-xs uppercase tracking-wider">
-                Day {state.day} · Run #{run.id}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-5">
-            <Stat icon={<Heart className="h-4 w-4 text-rose-400" />} label="hp" value={state.hp} />
-            <Stat
-              icon={<Coins className="h-4 w-4 text-amber-300" />}
-              label="gold"
-              value={state.gold}
-            />
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMessage(null);
-                combat.mutate();
-              }}
-              disabled={combat.isPending}
-              className="flex items-center gap-1.5 rounded-md border border-amber-600 bg-amber-500/10 px-3 py-1.5 font-medium text-amber-100 text-sm hover:bg-amber-500/20 disabled:opacity-50"
-            >
-              <Swords className="h-4 w-4" />
-              {combat.isPending ? "Starting…" : "Start Combat"}
-            </button>
-            <button
-              type="button"
-              onClick={() => abandon.mutate()}
-              disabled={abandon.isPending}
-              className="rounded-md border border-rose-800 bg-rose-950/40 px-3 py-1.5 text-rose-200 text-xs hover:bg-rose-900/40 disabled:opacity-50"
-            >
-              {abandon.isPending ? "Abandoning…" : "Abandon"}
-            </button>
-          </div>
-        </header>
+        <DayTransition day={state.day} maxDay={MAX_DAY} />
+        <RunStatusBanner
+          heroName={hero?.name ?? run.heroId}
+          runId={run.id}
+          day={state.day}
+          maxDay={MAX_DAY}
+          hp={state.hp}
+          maxHp={maxHp}
+          gold={state.gold}
+          nextDayGold={state.day < MAX_DAY ? dailyGoldFor(state.day + 1) : 0}
+          shopLevel={state.shopLevel}
+          xp={state.xp}
+          xpToLevel={xpThreshold(state.shopLevel)}
+          maxShopLevel={MAX_SHOP_LEVEL}
+          onStartCombat={() => {
+            setErrorMessage(null);
+            combat.mutate();
+          }}
+          startingCombat={combat.isPending}
+          onAbandon={() => abandon.mutate()}
+          abandoning={abandon.isPending}
+        />
 
         <BoardGrid
           board={state.board}
@@ -371,6 +363,8 @@ export default function ShopPage() {
             <ShopRow
               shop={state.shop}
               shopLevel={state.shopLevel}
+              xp={state.xp}
+              xpToLevel={xpThreshold(state.shopLevel)}
               gold={state.gold}
               itemIndex={itemIndex}
               draggingFromIndex={draggingShopIndex}
@@ -418,16 +412,6 @@ export default function ShopPage() {
         ) : null}
       </DragOverlay>
     </DndContext>
-  );
-}
-
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
-  return (
-    <div className="flex items-center gap-1.5 text-sm">
-      {icon}
-      <span className="font-mono text-base">{value}</span>
-      <span className="text-slate-500 text-xs uppercase tracking-wider">{label}</span>
-    </div>
   );
 }
 
@@ -560,7 +544,14 @@ function applyXP(run: ActiveRun, cost: number): ActiveRun | null {
   if (run.state.gold < cost) return null;
   if (run.state.shopLevel >= MAX_SHOP_LEVEL) return null;
   run.state.gold -= cost;
-  run.state.shopLevel += 1;
+  run.state.xp += 1;
+  // Cascade level-ups while XP meets the threshold for the current level.
+  while (run.state.shopLevel < MAX_SHOP_LEVEL) {
+    const need = xpThreshold(run.state.shopLevel);
+    if (need === null || run.state.xp < need) break;
+    run.state.xp -= need;
+    run.state.shopLevel += 1;
+  }
   return run;
 }
 

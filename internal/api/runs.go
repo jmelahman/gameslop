@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/jmelahman/gameslop/internal/store"
 )
@@ -57,6 +58,32 @@ func (h *runHandler) active(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, run)
+}
+
+func (h *runHandler) history(w http.ResponseWriter, r *http.Request) {
+	limit := parseIntParam(r, "limit", 20)
+	offset := parseIntParam(r, "offset", 0)
+	entries, err := h.deps.History.List(r.Context(), store.DefaultPlayerID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	if entries == nil {
+		entries = []store.HistoryEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func parseIntParam(r *http.Request, key string, fallback int) int {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 func (h *runHandler) abandon(w http.ResponseWriter, r *http.Request) {

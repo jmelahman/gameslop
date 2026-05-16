@@ -14,10 +14,11 @@ type Board struct {
 	Items []model.BoardItem `json:"items"`
 }
 
-// pools maps a day index to a list of candidate boards. Days 1–3 are hand
-// authored to introduce mechanics gradually: day 1 is a single weak
-// attacker, day 2 layers a faster second weapon, day 3 introduces an
-// opponent heal so the combat engine's heal path exercises in real play.
+// pools maps a day index to a list of candidate boards. Days 1–10 are hand
+// authored so the difficulty ramp is predictable end-to-end: HP and item
+// count both scale roughly linearly. Each day has a small pool so seeded
+// reruns can produce slightly different fights; later phases will replace
+// this with procedural generation (plan: phase 11).
 var pools = map[int][]Board{
 	1: {
 		{
@@ -43,6 +44,106 @@ var pools = map[int][]Board{
 				{ItemID: "rusty_sword", Slot: 0},
 				{ItemID: "iron_dagger", Slot: 1},
 				{ItemID: "healing_potion", Slot: 2},
+			},
+		},
+	},
+	4: {
+		{
+			HP: 50,
+			Items: []model.BoardItem{
+				{ItemID: "rusty_sword", Slot: 0},
+				{ItemID: "iron_dagger", Slot: 1},
+				{ItemID: "wooden_shield", Slot: 2},
+			},
+		},
+		{
+			HP: 48,
+			Items: []model.BoardItem{
+				{ItemID: "iron_dagger", Slot: 0},
+				{ItemID: "iron_dagger", Slot: 1},
+				{ItemID: "healing_potion", Slot: 2},
+			},
+		},
+	},
+	5: {
+		{
+			HP: 62,
+			Items: []model.BoardItem{
+				{ItemID: "rusty_sword", Slot: 0},
+				{ItemID: "rusty_sword", Slot: 1},
+				{ItemID: "iron_dagger", Slot: 2},
+				{ItemID: "wooden_shield", Slot: 3},
+			},
+		},
+	},
+	6: {
+		{
+			HP: 74,
+			Items: []model.BoardItem{
+				{ItemID: "iron_dagger", Slot: 0},
+				{ItemID: "iron_dagger", Slot: 1},
+				{ItemID: "rusty_sword", Slot: 2},
+				{ItemID: "healing_potion", Slot: 3},
+			},
+		},
+		{
+			HP: 78,
+			Items: []model.BoardItem{
+				{ItemID: "rusty_sword", Slot: 0},
+				{ItemID: "rusty_sword", Slot: 1},
+				{ItemID: "wooden_shield", Slot: 2},
+				{ItemID: "wooden_shield", Slot: 3},
+			},
+		},
+	},
+	7: {
+		{
+			HP: 90,
+			Items: []model.BoardItem{
+				{ItemID: "rusty_sword", Slot: 0},
+				{ItemID: "rusty_sword", Slot: 1},
+				{ItemID: "iron_dagger", Slot: 2},
+				{ItemID: "iron_dagger", Slot: 3},
+				{ItemID: "healing_potion", Slot: 4},
+			},
+		},
+	},
+	8: {
+		{
+			HP: 105,
+			Items: []model.BoardItem{
+				{ItemID: "iron_dagger", Slot: 0},
+				{ItemID: "iron_dagger", Slot: 1},
+				{ItemID: "rusty_sword", Slot: 2},
+				{ItemID: "rusty_sword", Slot: 3},
+				{ItemID: "wooden_shield", Slot: 4},
+			},
+		},
+	},
+	9: {
+		{
+			HP: 120,
+			Items: []model.BoardItem{
+				{ItemID: "rusty_sword", Slot: 0},
+				{ItemID: "rusty_sword", Slot: 1},
+				{ItemID: "iron_dagger", Slot: 2},
+				{ItemID: "iron_dagger", Slot: 3},
+				{ItemID: "wooden_shield", Slot: 4},
+				{ItemID: "healing_potion", Slot: 5},
+			},
+		},
+	},
+	10: {
+		{
+			HP: 150,
+			Items: []model.BoardItem{
+				{ItemID: "rusty_sword", Slot: 0},
+				{ItemID: "rusty_sword", Slot: 1},
+				{ItemID: "iron_dagger", Slot: 2},
+				{ItemID: "iron_dagger", Slot: 3},
+				{ItemID: "wooden_shield", Slot: 4},
+				{ItemID: "wooden_shield", Slot: 5},
+				{ItemID: "healing_potion", Slot: 6},
 			},
 		},
 	},

@@ -15,6 +15,12 @@ import (
 // outcome wins the run.
 const MaxDay = 10
 
+// LossHPCost is the fixed amount of run HP a player loses for a combat loss.
+// Run HP is decoupled from the in-fight HP shown in the tick log: the fight
+// itself uses the hero's fixed combat HP pool, while the run HP just tracks
+// how many losses the player has left before the run ends.
+const LossHPCost = 20
+
 // combatHandler owns the /api/runs/active/combat/* routes.
 type combatHandler struct {
 	deps Deps
@@ -70,10 +76,18 @@ func (h *combatHandler) start(w http.ResponseWriter, r *http.Request) {
 	playerBoard := make([]model.BoardItem, len(active.State.Board))
 	copy(playerBoard, active.State.Board)
 
+	// Combat starts each player at their hero's fixed pool so the in-fight HP
+	// is consistent day to day; run HP is decremented on loss separately.
+	hero, ok := h.deps.Catalog.Heroes[active.Run.HeroID]
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "internal", "hero not found")
+		return
+	}
+
 	result := combat.Simulate(
 		playerBoard,
 		opp.Items,
-		active.State.HP,
+		hero.StartingHP,
 		opp.HP,
 		combatSeed(active.Run.ShopSeed, active.Run.ID, day),
 		h.deps.Catalog,
@@ -97,25 +111,61 @@ func (h *combatHandler) start(w http.ResponseWriter, r *http.Request) {
 		Day:           day,
 	}
 
-	// Update run state HP from sim result, clamped at 0. Ties don't cost run
-	// HP per the plan ("advance day, no reward, no HP cost"), so we only
-	// write back on win/loss.
-	newHP := result.PlayerEndHP
-	if newHP < 0 {
-		newHP = 0
-	}
-	if result.Outcome != model.CombatOutcomeTie {
-		active.State.HP = newHP
+	// Run HP only changes on a combat loss — by a fixed amount per the plan,
+	// independent of in-fight HP. Win/tie leave run HP untouched.
+	if result.Outcome == model.CombatOutcomeLoss {
+		active.State.HP -= LossHPCost
+		if active.State.HP < 0 {
+			active.State.HP = 0
+		}
 	}
 
 	switch {
 	case result.Outcome == model.CombatOutcomeLoss:
-		if err := h.deps.Runs.Finish(r.Context(), active.Run.ID, model.RunStatusLost); err != nil {
+		if err := h.deps.Runs.UpdateState(r.Context(), &active.State); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", err.Error())
 			return
 		}
-		resp.Ended = true
-		resp.FinalOutcome = model.RunStatusLost
+		if active.State.HP <= 0 {
+			if err := h.deps.Runs.Finish(r.Context(), active.Run.ID, model.RunStatusLost); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", err.Error())
+				return
+			}
+			resp.Ended = true
+			resp.FinalOutcome = model.RunStatusLost
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		// Survived the loss — advance day and refresh shop like a win, but no
+		// gold reward and no win bonus.
+		active.State.Day++
+		if day >= MaxDay {
+			// Lost on day 10 but still has HP left — still counts as run end
+			// because there is no day 11.
+			if err := h.deps.Runs.Finish(r.Context(), active.Run.ID, model.RunStatusLost); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal", err.Error())
+				return
+			}
+			resp.Ended = true
+			resp.FinalOutcome = model.RunStatusLost
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+		gold := 3 + active.State.Day
+		if gold > 10 {
+			gold = 10
+		}
+		active.State.Gold += gold
+		active.State.ShopRolls = 0
+		active.State.Shop = shop.Roll(
+			h.deps.Catalog, active.Run.ShopSeed,
+			active.State.Day, active.State.ShopRolls, active.State.ShopLevel, nil,
+		)
+		if err := h.deps.Runs.UpdateState(r.Context(), &active.State); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		resp.Run = active
 		writeJSON(w, http.StatusOK, resp)
 		return
 

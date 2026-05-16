@@ -173,6 +173,52 @@ func TestMoveOnBoardSameSlotNoop(t *testing.T) {
 	}
 }
 
+func TestBuyXPAddsOneXPPerPurchase(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{Gold: 4, ShopLevel: 1, Shop: Roll(cat, 1, 1, 0, 1, nil)}
+	if err := BuyXP(state, cat, 1); err != nil {
+		t.Fatal(err)
+	}
+	if state.XP != 1 {
+		t.Fatalf("expected XP=1 after one buy, got %d", state.XP)
+	}
+	if state.Gold != 0 {
+		t.Fatalf("expected 0g after 4g XP buy, got %d", state.Gold)
+	}
+	if state.ShopLevel != 1 {
+		t.Fatalf("expected level=1 (no level-up), got %d", state.ShopLevel)
+	}
+}
+
+func TestBuyXPLevelsUpAtThreshold(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{Gold: 100, ShopLevel: 1, Shop: Roll(cat, 1, 1, 0, 1, nil)}
+	// Lvl 1 → Lvl 2 needs 4 XP.
+	for i := 0; i < 4; i++ {
+		if err := BuyXP(state, cat, 1); err != nil {
+			t.Fatalf("buy %d: %v", i, err)
+		}
+	}
+	if state.ShopLevel != 2 {
+		t.Fatalf("expected level=2 after 4 XP, got %d", state.ShopLevel)
+	}
+	if state.XP != 0 {
+		t.Fatalf("expected XP reset to 0 after level-up, got %d", state.XP)
+	}
+	// Slot count should jump to L2's slots.
+	if len(state.Shop) != SlotsFor(2) {
+		t.Fatalf("expected %d slots at L2, got %d", SlotsFor(2), len(state.Shop))
+	}
+}
+
+func TestBuyXPCappedAtMaxLevel(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{Gold: 100, ShopLevel: MaxShopLevel, Shop: Roll(cat, 1, 1, 0, MaxShopLevel, nil)}
+	if err := BuyXP(state, cat, 1); err == nil {
+		t.Fatal("expected ErrShopLevelMax at max level")
+	}
+}
+
 func TestRefreshDeducts(t *testing.T) {
 	cat := newCat()
 	state := &model.RunState{Gold: 2, Day: 1, ShopLevel: 1, Shop: Roll(cat, 1, 1, 0, 1, nil)}

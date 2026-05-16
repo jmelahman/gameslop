@@ -20,8 +20,25 @@ const MaxShopLevel = 4
 // RefreshCost is the gold required for a manual shop refresh.
 const RefreshCost = 1
 
-// XPCost is the gold required to buy a shop level.
+// XPCost is the gold required to buy one XP point.
 const XPCost = 4
+
+// XPPerPurchase is the amount of XP added by a single /shop/xp purchase.
+const XPPerPurchase = 1
+
+// xpThresholds is the XP required to level up from the index level to the next
+// (e.g. xpThresholds[1] = 4 XP needed to go from L1 to L2). Index 0 / max are
+// unused / no-op. Phase 9: 4, 7, 10 per the plan.
+var xpThresholds = []int{0, 4, 7, 10}
+
+// XPThreshold returns the XP required to level up from `level` to `level+1`,
+// or (0, false) if `level` is the cap (no further progression).
+func XPThreshold(level int) (int, bool) {
+	if level < 1 || level >= MaxShopLevel {
+		return 0, false
+	}
+	return xpThresholds[level], true
+}
 
 // Static errors returned by mutation helpers; the api layer maps each to a
 // specific HTTP code via errors.Is.
@@ -180,8 +197,10 @@ func Freeze(state *model.RunState, shopIndex int, frozen bool) error {
 	return nil
 }
 
-// BuyXP pays XPCost gold to raise the shop level by 1 and re-rolls the shop
-// at the new level (frozen items survive).
+// BuyXP pays XPCost gold to add one XP. When XP reaches the level-up threshold
+// the shop level is incremented (XP carried over above the threshold) and the
+// shop is re-rolled at the new level so the larger slot count and tier odds
+// are visible immediately. Frozen items survive a level-up roll.
 func BuyXP(state *model.RunState, cat Catalog, seed int64) error {
 	if state.ShopLevel >= MaxShopLevel {
 		return ErrShopLevelMax
@@ -190,9 +209,22 @@ func BuyXP(state *model.RunState, cat Catalog, seed int64) error {
 		return ErrInsufficientGold
 	}
 	state.Gold -= XPCost
-	state.ShopLevel++
-	state.ShopRolls++
-	state.Shop = Roll(cat, seed, state.Day, state.ShopRolls, state.ShopLevel, state.Shop)
+	state.XP += XPPerPurchase
+
+	leveled := false
+	for {
+		need, ok := XPThreshold(state.ShopLevel)
+		if !ok || state.XP < need {
+			break
+		}
+		state.XP -= need
+		state.ShopLevel++
+		leveled = true
+	}
+	if leveled {
+		state.ShopRolls++
+		state.Shop = Roll(cat, seed, state.Day, state.ShopRolls, state.ShopLevel, state.Shop)
+	}
 	return nil
 }
 
