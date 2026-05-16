@@ -4,5 +4,17 @@
     "name": "Knight",
     "description": "A stalwart fighter who favors weapons and shields.",
     "starting_hp": 100
+  },
+  {
+    "id": "ranger",
+    "name": "Ranger",
+    "description": "A nimble hunter who excels with bows and traps.",
+    "starting_hp": 90
+  },
+  {
+    "id": "alchemist",
+    "name": "Alchemist",
+    "description": "A potion-flinging tinkerer with explosive surprises.",
+    "starting_hp": 80
   }
 ]
