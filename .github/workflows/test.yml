@@ -1,0 +1,44 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions: {}
+
+jobs:
+  golang:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version: stable
+          cache: false
+      - run: go mod tidy
+      - run: git diff --exit-code go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          enable-cache: false
+      - name: prek
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            uvx prek run --from-ref "${{ github.event.pull_request.base.sha }}" --to-ref "${{ github.event.pull_request.head.sha }}"
+          else
+            uvx prek run --all-files
+          fi
