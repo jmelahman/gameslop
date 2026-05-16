@@ -1,10 +1,14 @@
 // Bottom-right shop row. Each shop slot is an ItemCard with a buy
-// affordance + a freeze toggle that overlays the top-right.
+// affordance + a freeze toggle that overlays the top-right. Cards are also
+// drag sources — dropping a shop item on the bench (or anywhere else) buys
+// it.
 
+import { useDraggable } from "@dnd-kit/core";
 import { RefreshCw, Snowflake, TrendingUp } from "lucide-react";
 import { ItemCard } from "@/components/game/ItemCard";
 import { cn } from "@/lib/cn";
 import type { Item, ShopItem } from "@/types/game";
+import { type DragSource, sourceId } from "../dnd";
 
 type Props = {
   shop: ShopItem[];
@@ -12,6 +16,8 @@ type Props = {
   gold: number;
   itemIndex: Record<string, Item>;
   pendingShopIndex?: number | null;
+  /** Index of the shop slot currently being dragged (so we can ghost it). */
+  draggingFromIndex: number | null;
   onBuy: (index: number) => void;
   onFreeze: (index: number, frozen: boolean) => void;
   onRefresh: () => void;
@@ -27,6 +33,7 @@ export function ShopRow({
   gold,
   itemIndex,
   pendingShopIndex,
+  draggingFromIndex,
   onBuy,
   onFreeze,
   onRefresh,
@@ -101,37 +108,70 @@ export function ShopRow({
           }
           const pending = pendingShopIndex === i;
           const cantAfford = gold < item.buyCost;
+          const ghost = draggingFromIndex === i;
+          const src: DragSource = {
+            kind: "shop",
+            index: i,
+            itemId: item.id,
+            size: item.size,
+          };
           return (
-            <ItemCard
-              key={key}
-              item={item}
-              onClick={() => onBuy(i)}
-              disabled={pending || cantAfford}
-              highlight={s.frozen}
-              costLabel={`${item.buyCost}g`}
-              costTone="buy"
-              badge={
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onFreeze(i, !s.frozen);
-                  }}
-                  className={cn(
-                    "rounded p-1 transition-colors",
-                    s.frozen
-                      ? "bg-cyan-500/40 text-cyan-100"
-                      : "bg-slate-800/80 text-slate-400 hover:text-cyan-200",
-                  )}
-                  aria-label={s.frozen ? "Unfreeze" : "Freeze"}
-                >
-                  <Snowflake className="h-3 w-3" />
-                </button>
-              }
-            />
+            <DraggableShopSlot key={key} id={sourceId(src)} data={src} ghost={ghost}>
+              <ItemCard
+                item={item}
+                onClick={() => onBuy(i)}
+                disabled={pending || cantAfford}
+                highlight={s.frozen}
+                costLabel={`${item.buyCost}g`}
+                costTone="buy"
+                badge={
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onFreeze(i, !s.frozen);
+                    }}
+                    className={cn(
+                      "rounded p-1 transition-colors",
+                      s.frozen
+                        ? "bg-cyan-500/40 text-cyan-100"
+                        : "bg-slate-800/80 text-slate-400 hover:text-cyan-200",
+                    )}
+                    aria-label={s.frozen ? "Unfreeze" : "Freeze"}
+                  >
+                    <Snowflake className="h-3 w-3" />
+                  </button>
+                }
+              />
+            </DraggableShopSlot>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function DraggableShopSlot({
+  id,
+  data,
+  ghost,
+  children,
+}: {
+  id: string;
+  data: DragSource;
+  ghost: boolean;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id, data });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{ touchAction: "none" }}
+      className={cn("cursor-grab active:cursor-grabbing", (ghost || isDragging) && "opacity-25")}
+    >
+      {children}
+    </div>
   );
 }

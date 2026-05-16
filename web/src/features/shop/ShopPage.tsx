@@ -2,16 +2,32 @@
 //   1. Hero / day / gold / HP banner
 //   2. Board (10-cell grid, multi-slot items)
 //   3. Bench
-//   4. Shop row (refresh, freeze, xp, buy)
+//   4. Sell zone
+//   5. Shop row (refresh, freeze, xp, click-to-buy)
 //
-// Mutations run optimistically against the cached ActiveRun; if the server
-// rejects (e.g. board_full, insufficient_gold), the cache rolls back and an
-// error toast appears at the bottom of the screen.
+// All cross-area transitions are driven by drag-and-drop via @dnd-kit. The
+// page owns the <DndContext>, tracks the active drag source, and routes
+// drag-end events to the appropriate optimistic mutation. Click-to-buy in
+// the shop row is preserved as a convenience; everything else (place, move,
+// remove, sell) is drag-only.
 
+import {
+  type CollisionDetection,
+  DndContext,
+  type DragEndEvent,
+  DragOverlay,
+  type DragStartEvent,
+  type DragOverEvent,
+  PointerSensor,
+  pointerWithin,
+  rectIntersection,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Coins, Heart, Sparkles, Swords } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
 import { startCombat } from "@/api/combat";
@@ -20,23 +36,34 @@ import {
   buyShopItem,
   buyShopXP,
   freezeShopItem,
+  moveBoardItem,
   placeItem,
   refreshShop,
   removeItem,
   sellItem,
 } from "@/api/shop";
-import { RUN_QUERY_KEY, useRun } from "@/hooks/useRun";
+import { ItemCard } from "@/components/game/ItemCard";
 import { useCatalog, useItemIndex } from "@/hooks/useCatalog";
+import { RUN_QUERY_KEY, useRun } from "@/hooks/useRun";
 import { useRunStore } from "@/store/runStore";
 import type { ActiveRun, BoardItem, Item } from "@/types/game";
 import { Bench } from "./components/Bench";
 import { BoardGrid } from "./components/BoardGrid";
+import { SellZone } from "./components/SellZone";
 import { ShopRow } from "./components/ShopRow";
+import { boardRangeFree, type DragSource, type DropTarget } from "./dnd";
 
 const REFRESH_COST = 1;
 const XP_COST = 4;
 const MAX_SHOP_LEVEL = 4;
-const BOARD_WIDTH = 10;
+const INVALID_FLASH_MS = 350;
+
+type HoverState = {
+  start: number;
+  size: number;
+  valid: boolean;
+  invalidFlash: boolean;
+};
 
 export default function ShopPage() {
   const navigate = useNavigate();
@@ -48,6 +75,10 @@ export default function ShopPage() {
   const catalog = useCatalog();
   const itemIndex = useItemIndex();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Dragging state owned by the page.
+  const [activeSource, setActiveSource] = useState<DragSource | null>(null);
+  const [hover, setHover] = useState<HoverState | null>(null);
 
   const combat = useMutation({
     mutationFn: startCombat,
@@ -81,8 +112,16 @@ export default function ShopPage() {
   });
 
   const optimisticPlace = useOptimisticMutation({
-    fn: (handSlot: number) => placeItem(handSlot),
-    onApply: (run, handSlot: number) => applyPlace(run, handSlot, itemIndex),
+    fn: ({ handSlot, boardSlot }: { handSlot: number; boardSlot: number }) =>
+      placeItem(handSlot, boardSlot),
+    onApply: (run, { handSlot, boardSlot }: { handSlot: number; boardSlot: number }) =>
+      applyPlace(run, handSlot, boardSlot, itemIndex),
+    onError: setErrorMessage,
+  });
+
+  const optimisticMove = useOptimisticMutation({
+    fn: ({ from, to }: { from: number; to: number }) => moveBoardItem(from, to),
+    onApply: (run, { from, to }: { from: number; to: number }) => applyMove(run, from, to),
     onError: setErrorMessage,
   });
 
@@ -129,6 +168,126 @@ export default function ShopPage() {
     throwOnError: false,
   });
 
+  // PointerSensor with a small activation distance so click-to-buy still works
+  // — the drag doesn't engage until the pointer moves 5px.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const board = data?.state.board ?? [];
+
+  // Collision strategy: pointerWithin works well for the bench/sell zone (they
+  // are large rectangles), but board cells are narrow and adjacent — fall back
+  // to rectIntersection if pointerWithin misses.
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    const pw = pointerWithin(args);
+    if (pw.length > 0) return pw;
+    return rectIntersection(args);
+  }, []);
+
+  const onDragStart = useCallback((e: DragStartEvent) => {
+    const src = e.active.data.current as DragSource | undefined;
+    if (!src) return;
+    setActiveSource(src);
+    setHover(null);
+    setErrorMessage(null);
+  }, []);
+
+  const onDragOver = useCallback(
+    (e: DragOverEvent) => {
+      const src = e.active.data.current as DragSource | undefined;
+      const dst = e.over?.data.current as DropTarget | undefined;
+      if (!src || !dst || dst.kind !== "board-cell") {
+        setHover(null);
+        return;
+      }
+      const size = src.size;
+      const start = dst.slot;
+      const ignoreSlot = src.kind === "board" ? src.slot : undefined;
+      const valid = boardRangeFree(board, itemIndex, start, size, ignoreSlot);
+      setHover({ start, size, valid, invalidFlash: false });
+    },
+    [board, itemIndex],
+  );
+
+  const flashInvalid = useCallback((start: number, size: number) => {
+    setHover({ start, size, valid: false, invalidFlash: true });
+    setTimeout(() => setHover(null), INVALID_FLASH_MS);
+  }, []);
+
+  const onDragEnd = useCallback(
+    (e: DragEndEvent) => {
+      const src = e.active.data.current as DragSource | undefined;
+      const dst = e.over?.data.current as DropTarget | undefined;
+      setActiveSource(null);
+      if (!src) {
+        setHover(null);
+        return;
+      }
+      if (!dst) {
+        setHover(null);
+        return;
+      }
+
+      if (dst.kind === "sell") {
+        setHover(null);
+        if (src.kind === "hand") optimisticSell.mutate({ location: "hand", slot: src.slot });
+        else if (src.kind === "board") optimisticSell.mutate({ location: "board", slot: src.slot });
+        // shop → sell is meaningless (the item isn't owned yet).
+        return;
+      }
+
+      if (dst.kind === "bench") {
+        setHover(null);
+        if (src.kind === "shop") optimisticBuy.mutate(src.index);
+        else if (src.kind === "board") optimisticRemove.mutate(src.slot);
+        // hand → bench is already on the bench: no-op.
+        return;
+      }
+
+      if (dst.kind === "board-cell") {
+        const start = dst.slot;
+        const size = src.size;
+        const ignoreSlot = src.kind === "board" ? src.slot : undefined;
+        const valid = boardRangeFree(board, itemIndex, start, size, ignoreSlot);
+        if (!valid) {
+          flashInvalid(start, size);
+          return;
+        }
+        setHover(null);
+        if (src.kind === "hand") {
+          optimisticPlace.mutate({ handSlot: src.slot, boardSlot: start });
+        } else if (src.kind === "board") {
+          if (src.slot === start) return;
+          optimisticMove.mutate({ from: src.slot, to: start });
+        } else if (src.kind === "shop") {
+          // MVP: dragging a shop item to a specific board cell still just
+          // buys it (lands on bench). A future polish phase can chain buy +
+          // place atomically so the item lands where the player aimed.
+          optimisticBuy.mutate(src.index);
+        }
+      }
+    },
+    [
+      board,
+      itemIndex,
+      optimisticBuy,
+      optimisticPlace,
+      optimisticMove,
+      optimisticRemove,
+      optimisticSell,
+      flashInvalid,
+    ],
+  );
+
+  const onDragCancel = useCallback(() => {
+    setActiveSource(null);
+    setHover(null);
+  }, []);
+
+  const overlayItem = useMemo<Item | null>(() => {
+    if (!activeSource) return null;
+    return itemIndex[activeSource.itemId] ?? null;
+  }, [activeSource, itemIndex]);
+
   if (isLoading || data === null || data === undefined || catalog.isLoading) {
     return <ShopSkeleton />;
   }
@@ -141,113 +300,124 @@ export default function ShopPage() {
   }
 
   const { run, state } = data;
+  const isDragging = activeSource !== null;
+  const draggingShopIndex = activeSource?.kind === "shop" ? activeSource.index : null;
+  const draggingHandSlot = activeSource?.kind === "hand" ? activeSource.slot : null;
+  const draggingBoardSlot = activeSource?.kind === "board" ? activeSource.slot : null;
 
   return (
-    <main className="flex min-h-screen flex-col gap-6 bg-slate-950 px-6 py-6 text-slate-50">
-      <header className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-3">
-        <div className="flex items-center gap-3">
-          <Sparkles className="h-5 w-5 text-amber-400" />
-          <div>
-            <p className="font-semibold capitalize text-lg leading-tight">{run.heroId}</p>
-            <p className="text-slate-400 text-xs uppercase tracking-wider">
-              Day {state.day} · Run #{run.id}
-            </p>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={collisionDetection}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
+      onDragCancel={onDragCancel}
+    >
+      <main className="flex min-h-screen flex-col gap-6 bg-slate-950 px-6 py-6 text-slate-50">
+        <header className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-800 bg-slate-900/60 px-5 py-3">
+          <div className="flex items-center gap-3">
+            <Sparkles className="h-5 w-5 text-amber-400" />
+            <div>
+              <p className="font-semibold capitalize text-lg leading-tight">{run.heroId}</p>
+              <p className="text-slate-400 text-xs uppercase tracking-wider">
+                Day {state.day} · Run #{run.id}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-5">
+            <Stat icon={<Heart className="h-4 w-4 text-rose-400" />} label="hp" value={state.hp} />
+            <Stat
+              icon={<Coins className="h-4 w-4 text-amber-300" />}
+              label="gold"
+              value={state.gold}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                setErrorMessage(null);
+                combat.mutate();
+              }}
+              disabled={combat.isPending}
+              className="flex items-center gap-1.5 rounded-md border border-amber-600 bg-amber-500/10 px-3 py-1.5 font-medium text-amber-100 text-sm hover:bg-amber-500/20 disabled:opacity-50"
+            >
+              <Swords className="h-4 w-4" />
+              {combat.isPending ? "Starting…" : "Start Combat"}
+            </button>
+            <button
+              type="button"
+              onClick={() => abandon.mutate()}
+              disabled={abandon.isPending}
+              className="rounded-md border border-rose-800 bg-rose-950/40 px-3 py-1.5 text-rose-200 text-xs hover:bg-rose-900/40 disabled:opacity-50"
+            >
+              {abandon.isPending ? "Abandoning…" : "Abandon"}
+            </button>
+          </div>
+        </header>
+
+        <BoardGrid
+          board={state.board}
+          itemIndex={itemIndex}
+          draggingFromSlot={draggingBoardSlot}
+          hover={hover}
+        />
+
+        <Bench hand={state.hand} itemIndex={itemIndex} draggingFromSlot={draggingHandSlot} />
+
+        <SellZone active={isDragging} />
+
+        <div className="mt-auto flex w-full justify-end">
+          <div className="w-full max-w-3xl">
+            <ShopRow
+              shop={state.shop}
+              shopLevel={state.shopLevel}
+              gold={state.gold}
+              itemIndex={itemIndex}
+              draggingFromIndex={draggingShopIndex}
+              onBuy={(index) => {
+                setErrorMessage(null);
+                optimisticBuy.mutate(index);
+              }}
+              onFreeze={(index, frozen) => {
+                setErrorMessage(null);
+                optimisticFreeze.mutate({ index, frozen });
+              }}
+              onRefresh={() => {
+                setErrorMessage(null);
+                optimisticRefresh.mutate(undefined);
+              }}
+              onXP={() => {
+                setErrorMessage(null);
+                optimisticXP.mutate(undefined);
+              }}
+              refreshCost={REFRESH_COST}
+              xpCost={XP_COST}
+              maxShopLevel={MAX_SHOP_LEVEL}
+            />
           </div>
         </div>
-        <div className="flex items-center gap-5">
-          <Stat icon={<Heart className="h-4 w-4 text-rose-400" />} label="hp" value={state.hp} />
-          <Stat
-            icon={<Coins className="h-4 w-4 text-amber-300" />}
-            label="gold"
-            value={state.gold}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setErrorMessage(null);
-              combat.mutate();
-            }}
-            disabled={combat.isPending}
-            className="flex items-center gap-1.5 rounded-md border border-amber-600 bg-amber-500/10 px-3 py-1.5 font-medium text-amber-100 text-sm hover:bg-amber-500/20 disabled:opacity-50"
+
+        {errorMessage ? (
+          <motion.div
+            key={errorMessage}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-md border border-rose-700 bg-rose-950/90 px-4 py-2 text-rose-100 text-sm shadow-lg"
+            role="alert"
           >
-            <Swords className="h-4 w-4" />
-            {combat.isPending ? "Starting…" : "Start Combat"}
-          </button>
-          <button
-            type="button"
-            onClick={() => abandon.mutate()}
-            disabled={abandon.isPending}
-            className="rounded-md border border-rose-800 bg-rose-950/40 px-3 py-1.5 text-rose-200 text-xs hover:bg-rose-900/40 disabled:opacity-50"
-          >
-            {abandon.isPending ? "Abandoning…" : "Abandon"}
-          </button>
-        </div>
-      </header>
+            {errorMessage}
+          </motion.div>
+        ) : null}
+      </main>
 
-      <BoardGrid
-        board={state.board}
-        itemIndex={itemIndex}
-        onRemove={(slot) => {
-          setErrorMessage(null);
-          optimisticRemove.mutate(slot);
-        }}
-      />
-
-      <Bench
-        hand={state.hand}
-        itemIndex={itemIndex}
-        onPlace={(handSlot) => {
-          setErrorMessage(null);
-          optimisticPlace.mutate(handSlot);
-        }}
-        onSell={(handSlot) => {
-          setErrorMessage(null);
-          optimisticSell.mutate({ location: "hand", slot: handSlot });
-        }}
-      />
-
-      <div className="mt-auto flex w-full justify-end">
-        <div className="w-full max-w-3xl">
-          <ShopRow
-            shop={state.shop}
-            shopLevel={state.shopLevel}
-            gold={state.gold}
-            itemIndex={itemIndex}
-            onBuy={(index) => {
-              setErrorMessage(null);
-              optimisticBuy.mutate(index);
-            }}
-            onFreeze={(index, frozen) => {
-              setErrorMessage(null);
-              optimisticFreeze.mutate({ index, frozen });
-            }}
-            onRefresh={() => {
-              setErrorMessage(null);
-              optimisticRefresh.mutate(undefined);
-            }}
-            onXP={() => {
-              setErrorMessage(null);
-              optimisticXP.mutate(undefined);
-            }}
-            refreshCost={REFRESH_COST}
-            xpCost={XP_COST}
-            maxShopLevel={MAX_SHOP_LEVEL}
-          />
-        </div>
-      </div>
-
-      {errorMessage ? (
-        <motion.div
-          key={errorMessage}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-md border border-rose-700 bg-rose-950/90 px-4 py-2 text-rose-100 text-sm shadow-lg"
-          role="alert"
-        >
-          {errorMessage}
-        </motion.div>
-      ) : null}
-    </main>
+      <DragOverlay dropAnimation={null}>
+        {overlayItem ? (
+          <div className="pointer-events-none w-28">
+            <ItemCard item={overlayItem} showTooltip={false} />
+          </div>
+        ) : null}
+      </DragOverlay>
+    </DndContext>
   );
 }
 
@@ -341,18 +511,26 @@ function applyBuy(
 function applyPlace(
   run: ActiveRun,
   handSlot: number,
+  boardSlot: number,
   itemIndex: Record<string, Item>,
 ): ActiveRun | null {
   const handEntry = run.state.hand[handSlot];
   if (!handEntry) return null;
   const def = itemIndex[handEntry.itemId];
   if (!def) return null;
-  const free = findFreeContiguousSlot(run.state.board, itemIndex, def.size);
-  if (free === null) return null;
-  const moved: BoardItem = { itemId: handEntry.itemId, slot: free };
+  if (!boardRangeFree(run.state.board, itemIndex, boardSlot, def.size)) return null;
+  const moved: BoardItem = { itemId: handEntry.itemId, slot: boardSlot };
   run.state.hand.splice(handSlot, 1);
   run.state.hand = run.state.hand.map((h, i) => ({ ...h, slot: i }));
   run.state.board.push(moved);
+  run.state.board.sort((a, b) => a.slot - b.slot);
+  return run;
+}
+
+function applyMove(run: ActiveRun, fromSlot: number, toSlot: number): ActiveRun | null {
+  const idx = run.state.board.findIndex((b) => b.slot === fromSlot);
+  if (idx < 0) return null;
+  run.state.board[idx] = { ...run.state.board[idx], slot: toSlot };
   run.state.board.sort((a, b) => a.slot - b.slot);
   return run;
 }
@@ -368,8 +546,6 @@ function applyRemove(run: ActiveRun, boardSlot: number): ActiveRun | null {
 function applyRefreshCost(run: ActiveRun, cost: number): ActiveRun | null {
   if (run.state.gold < cost) return null;
   run.state.gold -= cost;
-  // The actual reroll is server-authoritative; we just mark the cost
-  // optimistically so the gold counter reacts immediately.
   return run;
 }
 
@@ -411,27 +587,4 @@ function applySell(
   run.state.board.splice(idx, 1);
   run.state.gold += def.sellValue;
   return run;
-}
-
-function findFreeContiguousSlot(
-  board: BoardItem[],
-  itemIndex: Record<string, Item>,
-  size: number,
-): number | null {
-  const occupied = new Array<boolean>(BOARD_WIDTH).fill(false);
-  for (const b of board) {
-    const w = itemIndex[b.itemId]?.size ?? 1;
-    for (let i = b.slot; i < b.slot + w && i < BOARD_WIDTH; i++) occupied[i] = true;
-  }
-  for (let s = 0; s + size <= BOARD_WIDTH; s++) {
-    let free = true;
-    for (let i = s; i < s + size; i++) {
-      if (occupied[i]) {
-        free = false;
-        break;
-      }
-    }
-    if (free) return s;
-  }
-  return null;
 }

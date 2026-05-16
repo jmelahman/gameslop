@@ -39,6 +39,28 @@ func (h *shopHandler) place(w http.ResponseWriter, r *http.Request) {
 	h.persistAndWrite(w, r, ra)
 }
 
+type moveRequest struct {
+	FromSlot int `json:"from_slot"`
+	ToSlot   int `json:"to_slot"`
+}
+
+func (h *shopHandler) move(w http.ResponseWriter, r *http.Request) {
+	var req moveRequest
+	if err := decodeBody(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	ra, ok := h.loadActive(w, r)
+	if !ok {
+		return
+	}
+	if err := shop.MoveOnBoard(&ra.State, h.deps.Catalog, req.FromSlot, req.ToSlot); err != nil {
+		writeShopError(w, err)
+		return
+	}
+	h.persistAndWrite(w, r, ra)
+}
+
 type removeRequest struct {
 	BoardSlot int `json:"board_slot"`
 }

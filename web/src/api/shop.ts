@@ -29,5 +29,8 @@ export const placeItem = (handSlot: number, boardSlot?: number) =>
 export const removeItem = (boardSlot: number) =>
   postRun("/api/runs/active/board/remove", { board_slot: boardSlot });
 
+export const moveBoardItem = (fromSlot: number, toSlot: number) =>
+  postRun("/api/runs/active/board/move", { from_slot: fromSlot, to_slot: toSlot });
+
 export const sellItem = (location: "board" | "hand", slot: number) =>
   postRun("/api/runs/active/items/sell", { location, slot });

@@ -235,6 +235,44 @@ func PlaceOnBoard(state *model.RunState, cat Catalog, handSlot, boardSlot int) e
 	return nil
 }
 
+// MoveOnBoard re-anchors an item already on the board to a new leftmost slot.
+// The target range [toSlot, toSlot+size) must be empty when ignoring the
+// item being moved. Returns ErrInvalidBoardSlot if the source is missing or
+// the target is out of range, and ErrBoardFull if the target overlaps another
+// item.
+func MoveOnBoard(state *model.RunState, cat Catalog, fromSlot, toSlot int) error {
+	idx := findBoardIndex(state.Board, fromSlot)
+	if idx < 0 {
+		return ErrInvalidBoardSlot
+	}
+	def, ok := cat.Item(state.Board[idx].ItemID)
+	if !ok {
+		return ErrUnknownItem
+	}
+	size := def.Size
+	if size < 1 {
+		size = 1
+	}
+	if toSlot < 0 || toSlot > BoardWidth-size {
+		return ErrInvalidBoardSlot
+	}
+	if toSlot == fromSlot {
+		return nil
+	}
+	// Check collisions while ignoring the moving item itself.
+	moving := state.Board[idx]
+	rest := make([]model.BoardItem, 0, len(state.Board)-1)
+	rest = append(rest, state.Board[:idx]...)
+	rest = append(rest, state.Board[idx+1:]...)
+	if !boardRangeFree(rest, cat, toSlot, size) {
+		return ErrBoardFull
+	}
+	moving.Slot = toSlot
+	state.Board = append(rest, moving)
+	sortBoard(state.Board)
+	return nil
+}
+
 // RemoveFromBoard moves a board item back to the bench.
 func RemoveFromBoard(state *model.RunState, boardSlot int) error {
 	idx := findBoardIndex(state.Board, boardSlot)

@@ -33,6 +33,7 @@ func Register(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("POST /api/runs/active/shop/freeze", sh.freeze)
 	mux.HandleFunc("POST /api/runs/active/shop/xp", sh.xp)
 	mux.HandleFunc("POST /api/runs/active/board/place", sh.place)
+	mux.HandleFunc("POST /api/runs/active/board/move", sh.move)
 	mux.HandleFunc("POST /api/runs/active/board/remove", sh.remove)
 	mux.HandleFunc("POST /api/runs/active/items/sell", sh.sell)
 

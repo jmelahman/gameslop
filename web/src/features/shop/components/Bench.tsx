@@ -1,22 +1,29 @@
-// Bench (hand) row. Cards laid out in a fixed-cell grid; clicking a card
-// promotes it to the first free board slot. Right-click sells it (a
-// stretch goal for phase 12 — kept simple here with a sell button overlay
-// on hover-ish layouts, but we render a tiny "$" badge for visibility).
+// Bench (hand) row. The bench is one big drop target — items dropped on
+// any bench cell go to the next free hand slot (the server appends). Each
+// bench card is a drag source so it can be moved to the board or onto the
+// sell zone.
 
+import { useDraggable, useDroppable } from "@dnd-kit/core";
 import { ItemCard } from "@/components/game/ItemCard";
+import { cn } from "@/lib/cn";
 import type { BoardItem, Item } from "@/types/game";
+import { BENCH_DROP_ID, type DragSource, sourceId } from "../dnd";
 
 const BENCH_WIDTH = 10;
 
 type Props = {
   hand: BoardItem[];
   itemIndex: Record<string, Item>;
-  pendingSlot?: number | null;
-  onPlace: (handSlot: number) => void;
-  onSell: (handSlot: number) => void;
+  /** Hand slot of the item currently being dragged (so we can ghost it). */
+  draggingFromSlot: number | null;
 };
 
-export function Bench({ hand, itemIndex, pendingSlot, onPlace, onSell }: Props) {
+export function Bench({ hand, itemIndex, draggingFromSlot }: Props) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: BENCH_DROP_ID,
+    data: { kind: "bench" },
+  });
+
   return (
     <section className="w-full">
       <header className="mb-2 flex items-baseline justify-between text-slate-400 text-xs uppercase tracking-wider">
@@ -26,43 +33,62 @@ export function Bench({ hand, itemIndex, pendingSlot, onPlace, onSell }: Props) 
         </span>
       </header>
       <div
-        className="grid h-32 gap-2"
+        ref={setNodeRef}
+        className={cn(
+          "grid h-32 gap-2 rounded-md border-2 border-transparent p-1 transition-colors",
+          isOver && "border-emerald-500/60 bg-emerald-500/5",
+        )}
         style={{ gridTemplateColumns: `repeat(${BENCH_WIDTH}, minmax(0, 1fr))` }}
       >
         {hand.map((h) => {
           const item = itemIndex[h.itemId];
           if (!item) return null;
-          const pending = pendingSlot === h.slot;
+          const isSource = draggingFromSlot === h.slot;
+          const src: DragSource = {
+            kind: "hand",
+            slot: h.slot,
+            itemId: h.itemId,
+            size: item.size,
+          };
           return (
-            <div
+            <DraggableHandItem
               key={`hand-${h.slot}-${h.itemId}`}
-              className="relative"
-              style={{ gridColumn: "span 1" }}
+              id={sourceId(src)}
+              data={src}
+              ghost={isSource}
             >
-              <ItemCard
-                item={item}
-                onClick={() => onPlace(h.slot)}
-                disabled={pending}
-                className="h-full"
-              />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSell(h.slot);
-                }}
-                disabled={pending}
-                aria-label={`Sell ${item.name}`}
-                className="absolute top-1 left-1 z-10 rounded bg-rose-900/70 px-1.5 font-mono text-rose-100 text-xs hover:bg-rose-800 disabled:opacity-50"
-              >
-                +{item.sellValue}g
-              </button>
-            </div>
+              <ItemCard item={item} className="h-full" />
+            </DraggableHandItem>
           );
         })}
         {emptySlots(hand.length, BENCH_WIDTH)}
       </div>
     </section>
+  );
+}
+
+function DraggableHandItem({
+  id,
+  data,
+  ghost,
+  children,
+}: {
+  id: string;
+  data: DragSource;
+  ghost: boolean;
+  children: React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id, data });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{ gridColumn: "span 1", touchAction: "none" }}
+      className={cn("cursor-grab active:cursor-grabbing", (ghost || isDragging) && "opacity-25")}
+    >
+      {children}
+    </div>
   );
 }
 

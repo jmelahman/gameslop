@@ -122,6 +122,57 @@ func TestPlaceOnBoardFull(t *testing.T) {
 	}
 }
 
+func TestMoveOnBoardReanchors(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{
+		Board: []model.BoardItem{{ItemID: "a", Slot: 0}, {ItemID: "a", Slot: 4}},
+	}
+	if err := MoveOnBoard(state, cat, 0, 2); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Board) != 2 {
+		t.Fatalf("board length changed: %+v", state.Board)
+	}
+	if state.Board[0].Slot != 2 || state.Board[1].Slot != 4 {
+		t.Fatalf("expected slots [2,4], got %+v", state.Board)
+	}
+}
+
+func TestMoveOnBoardRejectsOverlap(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{
+		Board: []model.BoardItem{{ItemID: "b", Slot: 0}, {ItemID: "a", Slot: 3}},
+	}
+	// b is size-2; moving it from 0 to 2 would overlap a@3.
+	if err := MoveOnBoard(state, cat, 0, 2); err == nil {
+		t.Fatal("expected overlap to be rejected")
+	}
+}
+
+func TestMoveOnBoardRejectsOutOfRange(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{
+		Board: []model.BoardItem{{ItemID: "b", Slot: 0}},
+	}
+	// b is size-2; toSlot=9 would put it at [9,10] which is out of bounds.
+	if err := MoveOnBoard(state, cat, 0, 9); err == nil {
+		t.Fatal("expected out-of-range to be rejected")
+	}
+}
+
+func TestMoveOnBoardSameSlotNoop(t *testing.T) {
+	cat := newCat()
+	state := &model.RunState{
+		Board: []model.BoardItem{{ItemID: "a", Slot: 4}},
+	}
+	if err := MoveOnBoard(state, cat, 4, 4); err != nil {
+		t.Fatal(err)
+	}
+	if state.Board[0].Slot != 4 {
+		t.Fatalf("expected slot 4 preserved, got %+v", state.Board)
+	}
+}
+
 func TestRefreshDeducts(t *testing.T) {
 	cat := newCat()
 	state := &model.RunState{Gold: 2, Day: 1, ShopLevel: 1, Shop: Roll(cat, 1, 1, 0, 1, nil)}
