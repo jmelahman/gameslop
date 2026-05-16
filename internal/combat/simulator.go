@@ -1,22 +1,19 @@
 package combat
 
 import (
-	"sort"
+	"math/rand/v2"
 
 	"github.com/jmelahman/gameslop/internal/model"
 )
 
 // Simulate runs a deterministic fight between playerBoard and opponentBoard.
+// Same inputs (boards, starting HP, seed) always yield a byte-identical tick
+// log so the same encounter can be replayed indefinitely and compared in
+// table tests.
 //
-// Phase 5 contract: each item fires exactly once at fight start. Player items
-// fire first, then opponent items, in slot order. Each item's first cooldown
-// trigger's first damage effect lands on the opposite side. HP is reduced in
-// order; once a side hits 0 it can still take damage from queued events in
-// the same tick (the outcome is computed from final totals). The tick log is
-// one event per moment of interest so the client can pace playback at 100 ms.
-//
-// seed is currently unused — included so the signature is stable when later
-// phases add randomized targeting / RNG-driven effects.
+// The simulator is pure: it does not read the database, the wall clock, or
+// any global RNG. The caller decides starting HP totals; the engine drives
+// the rest from the catalog data attached to each item id.
 func Simulate(
 	playerBoard, opponentBoard []model.BoardItem,
 	playerHP, opponentHP int,
@@ -29,87 +26,44 @@ func Simulate(
 		OpponentStartHP: opponentHP,
 		Ticks:           []model.TickEvent{},
 	}
+	// math/rand/v2 ChaCha8 needs a 32-byte seed; expand the int64 with a
+	// splitmix-style hash so adjacent seeds produce well-spread streams.
+	rng := rand.New(rand.NewChaCha8(expandSeed(seed)))
 
-	player := sortedBySlot(playerBoard)
-	opponent := sortedBySlot(opponentBoard)
-
-	tick := 0
-	res.Ticks = append(res.Ticks, model.TickEvent{Tick: tick, Type: "fight_start"})
-
-	playerCur := playerHP
-	opponentCur := opponentHP
-
-	// Interleave player / opponent items so the playback feels like a back-and-
-	// forth exchange. Each item gets its own tick (item_fired + optional damage)
-	// so the 100ms-per-tick playback reads as a sequence of distinct beats.
-	maxLen := len(player)
-	if len(opponent) > maxLen {
-		maxLen = len(opponent)
-	}
-	for i := 0; i < maxLen; i++ {
-		if i < len(player) {
-			tick++
-			fireItem(res, cat, player[i], model.SidePlayer, model.SideOpponent, &opponentCur, tick)
-		}
-		if i < len(opponent) {
-			tick++
-			fireItem(res, cat, opponent[i], model.SideOpponent, model.SidePlayer, &playerCur, tick)
-		}
+	state := &LiveState{
+		PlayerHP:      playerHP,
+		PlayerMaxHP:   playerHP,
+		OpponentHP:    opponentHP,
+		OpponentMaxHP: opponentHP,
+		PlayerItems:   buildLiveItems(playerBoard, model.SidePlayer, cat),
+		OpponentItems: buildLiveItems(opponentBoard, model.SideOpponent, cat),
 	}
 
-	res.PlayerEndHP = playerCur
-	res.OpponentEndHP = opponentCur
-	res.Outcome = outcomeFor(playerCur, opponentCur)
-
-	tick++
-	res.Ticks = append(res.Ticks, model.TickEvent{
-		Tick: tick,
-		Type: "fight_end",
-	})
-
+	runEngine(state, cat, rng, res)
 	return res
 }
 
-// fireItem emits the (item_fired, damage) event pair for a single item and
-// decrements the target's HP in place. Items with no damaging cooldown
-// trigger still emit item_fired so the client can show "X activates" for
-// shields and heals later — for Phase 5 they simply do nothing else.
-func fireItem(
-	res *model.CombatResult,
-	cat Catalog,
-	bi model.BoardItem,
-	source, target model.Side,
-	targetHP *int,
-	tick int,
-) {
-	def, ok := cat.Item(bi.ItemID)
-	res.Ticks = append(res.Ticks, model.TickEvent{
-		Tick:   tick,
-		Type:   "item_fired",
-		Source: string(source) + ":" + bi.ItemID,
-	})
-	if !ok {
-		return
+// expandSeed scatters an int64 seed across 32 bytes via a splitmix64
+// progression. Identical inputs produce identical byte sequences, which is
+// what the determinism guarantee rests on.
+func expandSeed(seed int64) [32]byte {
+	var out [32]byte
+	z := uint64(seed)
+	for i := 0; i < 4; i++ {
+		z += 0x9e3779b97f4a7c15
+		x := z
+		x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
+		x = (x ^ (x >> 27)) * 0x94d049bb133111eb
+		x = x ^ (x >> 31)
+		base := i * 8
+		out[base+0] = byte(x)
+		out[base+1] = byte(x >> 8)
+		out[base+2] = byte(x >> 16)
+		out[base+3] = byte(x >> 24)
+		out[base+4] = byte(x >> 32)
+		out[base+5] = byte(x >> 40)
+		out[base+6] = byte(x >> 48)
+		out[base+7] = byte(x >> 56)
 	}
-	dmg := firstCooldownDamage(def)
-	if dmg <= 0 {
-		return
-	}
-	*targetHP -= dmg
-	res.Ticks = append(res.Ticks, model.TickEvent{
-		Tick:   tick,
-		Type:   "damage",
-		Source: string(source) + ":" + bi.ItemID,
-		Target: string(target),
-		Value:  dmg,
-	})
-}
-
-// sortedBySlot returns a copy of items sorted ascending by slot so iteration
-// order is deterministic regardless of how they were stored.
-func sortedBySlot(items []model.BoardItem) []model.BoardItem {
-	out := make([]model.BoardItem, len(items))
-	copy(out, items)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Slot < out[j].Slot })
 	return out
 }

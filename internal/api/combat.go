@@ -36,10 +36,10 @@ type combatStartResponse struct {
 
 // combatSeed mixes the run's shop_seed with run_id and day to give Simulate a
 // reproducible per-fight seed without colliding with shop or encounter seeds.
+// Matches the plan's formula: shop_seed XOR (run_id * 0x517cc1b727220a95) XOR day.
 func combatSeed(shopSeed, runID int64, day int) int64 {
 	const mixA uint64 = 0x517cc1b727220a95
-	const mixB uint64 = 0x9e3779b97f4a7c15
-	return int64(uint64(shopSeed) ^ (uint64(runID) * mixA) ^ (uint64(day) * mixB))
+	return int64(uint64(shopSeed) ^ (uint64(runID) * mixA) ^ uint64(day))
 }
 
 // encounterSeed mixes shop_seed with day so opponent generation is stable
@@ -97,15 +97,19 @@ func (h *combatHandler) start(w http.ResponseWriter, r *http.Request) {
 		Day:           day,
 	}
 
-	// Update run state HP from sim result, clamped at 0.
+	// Update run state HP from sim result, clamped at 0. Ties don't cost run
+	// HP per the plan ("advance day, no reward, no HP cost"), so we only
+	// write back on win/loss.
 	newHP := result.PlayerEndHP
 	if newHP < 0 {
 		newHP = 0
 	}
-	active.State.HP = newHP
+	if result.Outcome != model.CombatOutcomeTie {
+		active.State.HP = newHP
+	}
 
 	switch {
-	case result.Outcome == model.CombatOutcomeLoss || newHP <= 0:
+	case result.Outcome == model.CombatOutcomeLoss:
 		if err := h.deps.Runs.Finish(r.Context(), active.Run.ID, model.RunStatusLost); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", err.Error())
 			return

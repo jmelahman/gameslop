@@ -210,15 +210,20 @@ function CombatSkeleton() {
 }
 
 // replayHp walks the tick log up to (and including) cutoffTick, accumulating
-// damage. Other effects (heal, shield) will join the switch in later phases.
+// damage and heal events. Other state effects (shield, status) will join the
+// switch in later phases.
 function replayHp(combat: CombatResponse, cutoffTick: number) {
   let playerHp = combat.result.playerStartHp;
   let opponentHp = combat.result.opponentStartHp;
   for (const ev of combat.result.ticks) {
     if (ev.tick > cutoffTick) break;
-    if (ev.type === "damage" && ev.value) {
+    if (!ev.value) continue;
+    if (ev.type === "damage") {
       if (ev.target === "player") playerHp -= ev.value;
       else if (ev.target === "opponent") opponentHp -= ev.value;
+    } else if (ev.type === "heal") {
+      if (ev.target === "player") playerHp += ev.value;
+      else if (ev.target === "opponent") opponentHp += ev.value;
     }
   }
   return { playerHp, opponentHp };
@@ -240,6 +245,10 @@ function formatEvent(ev: TickEvent, itemIndex: Record<string, Item>): string {
       return `${sourceName(ev.source)} fires`;
     case "damage":
       return `${ev.target ?? "?"} takes ${ev.value ?? 0} damage`;
+    case "heal":
+      return `${ev.target ?? "?"} heals ${ev.value ?? 0}`;
+    case "death":
+      return `${ev.target ?? "?"} is defeated`;
     default:
       return ev.type;
   }
