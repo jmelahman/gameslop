@@ -1,4 +1,5 @@
-// genart drives the local Stable Diffusion WebUI to produce item icon art.
+// genart drives a local ComfyUI server to produce item icon art via Flux
+// Schnell.
 //
 //	go run ./cmd/genart                        # only items missing a PNG (default)
 //	go run ./cmd/genart --all                  # regenerate every catalog item
@@ -33,7 +34,7 @@ import (
 )
 
 const (
-	defaultBaseURL = "http://localhost:7860"
+	defaultBaseURL = "http://localhost:8188"
 	outputDir      = "web/public/items"
 )
 
@@ -42,7 +43,7 @@ func main() {
 	missingOnly := flag.Bool("missing-only", true, "only generate art for items without a PNG (default)")
 	itemID := flag.String("item", "", "generate just this one item id (ignores --missing-only)")
 	reroll := flag.Bool("reroll", false, "use a fresh seed for the targeted items (otherwise seed is sha256(item.id))")
-	baseURL := flag.String("sd-url", envOr("GENART_SD_URL", defaultBaseURL), "Stable Diffusion WebUI base URL")
+	baseURL := flag.String("comfy-url", envOr("GENART_COMFY_URL", defaultBaseURL), "ComfyUI base URL")
 	dbPath := flag.String("db", envOr("GAMESLOP_DB", "gameslop.db"), "SQLite database path")
 	flag.Parse()
 
@@ -76,7 +77,7 @@ func main() {
 	client := art.NewClient(*baseURL)
 	modelName, err := client.ModelTitle(ctx)
 	if err != nil {
-		log.Fatalf("contact SD at %s: %v\n(is the container up? docker compose up -d stable-diffusion)", *baseURL, err)
+		log.Fatalf("contact ComfyUI at %s: %v\n(is the container up? docker compose up -d comfyui)", *baseURL, err)
 	}
 	if modelName == "" {
 		modelName = "unknown"
@@ -104,7 +105,7 @@ func main() {
 
 		log.Printf("[%d/%d] %s … (seed=%d)", i+1, len(targets), item.ID, seed)
 		started := time.Now()
-		img, returnedSeed, err := client.Generate(ctx, art.DefaultRequest(prompt, seed))
+		img, returnedSeed, err := client.Generate(ctx, prompt, seed)
 		if err != nil {
 			log.Fatalf("[%d/%d] %s: %v", i+1, len(targets), item.ID, err)
 		}

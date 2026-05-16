@@ -31,9 +31,10 @@ go.work.sum
 !assets/*.png
 !web/public/items/*.png
 
-# Local Stable Diffusion data: models (multi-GB), outputs, cached configs.
-# Track only `art/README.md` describing the layout.
+# Local image-gen data: models (multi-GB), outputs, ComfyUI install/state.
+# Track only `art/README.md` and `art/bootstrap.sh` describing the layout.
 art/sd-data/
+art/comfy-data/
 
 .claude-tmp/
 .claude/settings.local.json

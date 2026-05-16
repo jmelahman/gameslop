@@ -1,41 +1,35 @@
-# Local Stable Diffusion WebUI (AUTOMATIC1111) running on CPU. Used by
-# `cmd/genart` to generate item icon art. CPU-only is intentional — quality
-# over speed; expect 15–30 min per 1024×1024 image with Hires Fix.
+# Local ComfyUI running on CPU. Used by `cmd/genart` to generate item icon
+# art via Flux Schnell (GGUF Q8). CPU-only is intentional — no GPU required;
+# expect ~5-8 min per 1024x1024 image.
 #
-# Bring up:           docker compose up -d stable-diffusion
-# Health check:       curl http://localhost:7860/sdapi/v1/sd-models
+# Bring up:           docker compose up -d comfyui
+# Health check:       curl http://localhost:8188/system_stats
 # Tear down:          docker compose down
 #
-# Model + LoRA download: see art/README.md.
+# Model + custom-node download: `./art/bootstrap.sh` (see art/README.md).
 #
-# Networking: the devcontainer's `kanban-network` is declared external so
-# both containers can talk via DNS name `stable-diffusion`. If that network
-# doesn't exist on your machine, comment the `kanban-network` block below
-# and use the `gameslop-net` block instead (compose will create it for you).
+# Networking: the devcontainer's `kanban-net` is declared external so both
+# containers can talk via DNS name `comfyui`. If that network doesn't exist
+# on your machine, comment the `kanban-net` block below and use the
+# `gameslop-net` block instead (compose will create it for you).
 services:
-  stable-diffusion:
-    image: ghcr.io/abdbarho/stable-diffusion-webui-docker:auto-cpu-latest
-    container_name: gameslop-sd
-    command: >-
-      --api
-      --listen
-      --use-cpu all
-      --no-half
-      --precision full
-      --skip-torch-cuda-test
-      --disable-nan-check
+  comfyui:
+    image: yanwk/comfyui-boot:cu128-slim
+    container_name: gameslop-comfyui
+    environment:
+      # --cpu forces CPU inference even though the image bundles CUDA libs.
+      # --listen 0.0.0.0 is required for access from outside the container.
+      CLI_ARGS: "--cpu --listen 0.0.0.0"
     ports:
-      - "7860:7860"
+      - "8188:8188"
     volumes:
-      - ./art/sd-data/models:/data/models
-      - ./art/sd-data/outputs:/output
-      - ./art/sd-data/config:/data/config
+      - ./art/comfy-data:/root
     restart: unless-stopped
     networks:
-      - kanban-network
+      - kanban-net
       # - gameslop-net
 
 networks:
-  kanban-network:
+  kanban-net:
     external: true
   # gameslop-net: {}

@@ -1,6 +1,6 @@
-// Package art generates item icon art via a local Stable Diffusion WebUI
-// (AUTOMATIC1111). Prompt assembly and seed derivation live here; the HTTP
-// client lives in client.go.
+// Package art generates item icon art via a local ComfyUI server running
+// Flux Schnell. Prompt assembly and seed derivation live here; the HTTP
+// client lives in client.go and the Flux workflow lives in workflow.go.
 package art
 
 import (
@@ -12,16 +12,13 @@ import (
 )
 
 // StyleSuffix is appended to every per-item prompt so the entire catalog
-// shares a coherent visual style. Changing this string will desync any
-// already-generated art — bump prompts intentionally.
-const StyleSuffix = "highly detailed painted illustration, dramatic rim lighting, " +
-	"centered on dark neutral background, intricate ornate details, " +
-	"single object, game asset, 8k, masterpiece, trending on artstation"
-
-// NegativePrompt steers the model away from common SDXL failure modes.
-const NegativePrompt = "text, watermark, signature, blurry, deformed, extra limbs, " +
-	"low quality, jpeg artifacts, ugly, flat lighting, frame, border, " +
-	"multiple objects, cluttered background, photograph"
+// shares a coherent visual style. Flux responds best to descriptive
+// natural-language phrases rather than keyword tags. Changing this string
+// will desync any already-generated art — bump prompts intentionally.
+const StyleSuffix = "rendered as a highly detailed painted illustration with " +
+	"dramatic rim lighting, centered on a dark neutral background, " +
+	"intricate ornate details, single object, game asset concept art, " +
+	"masterpiece quality"
 
 // BuildPrompt composes the positive prompt for one item: a fixed lead-in,
 // the item name, its tags lower-cased, then the global style suffix. Output
@@ -50,7 +47,7 @@ func SeedFor(itemID, nonce string) int64 {
 		h.Write([]byte(nonce))
 	}
 	sum := h.Sum(nil)
-	// Mask off the sign bit — A1111 stores seeds as signed 64-bit but its
-	// UI / logs expect non-negative values.
+	// Mask off the sign bit — seeds are stored as int64 in our DB but
+	// downstream consumers expect non-negative values.
 	return int64(binary.BigEndian.Uint64(sum[:8]) & 0x7fffffffffffffff)
 }

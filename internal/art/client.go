@@ -3,160 +3,203 @@ package art
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
-// Locked sampling parameters. Quality > speed is an explicit project choice
-// (CPU-only, build-time generation). Changing these will desync the visual
-// style of any already-generated art.
+// Locked sampling parameters. Flux Schnell is a 4-step distilled model
+// designed for fast inference; raising Steps does not improve quality.
+// Width/Height are Flux's native resolution. Quality > speed is an explicit
+// project choice (CPU-only, build-time generation).
 const (
-	Sampler            = "DPM++ 2M Karras"
-	Steps              = 35
-	CFGScale           = 6.5
-	BaseWidth          = 1024
-	BaseHeight         = 1024
-	HiResScale         = 1.5
-	HiResUpscaler      = "R-ESRGAN 4x+ Anime6B"
-	HiResSteps         = 15
-	HiResDenoising     = 0.35
+	UNetModel  = "flux1-schnell-Q8_0.gguf"
+	CLIPModelL = "clip_l.safetensors"
+	CLIPModelT = "t5xxl_fp8_e4m3fn.safetensors"
+	VAEModel   = "ae.safetensors"
+
+	Width  = 1024
+	Height = 1024
+	Steps  = 4
+
 	defaultHTTPTimeout = 90 * time.Minute
+	pollInterval       = 5 * time.Second
 )
 
-// GenerateRequest is the subset of A1111's `/sdapi/v1/txt2img` payload we use.
-// JSON tags match the WebUI's field names exactly.
-type GenerateRequest struct {
-	Prompt            string  `json:"prompt"`
-	NegativePrompt    string  `json:"negative_prompt"`
-	Seed              int64   `json:"seed"`
-	SamplerName       string  `json:"sampler_name"`
-	Steps             int     `json:"steps"`
-	CFGScale          float64 `json:"cfg_scale"`
-	Width             int     `json:"width"`
-	Height            int     `json:"height"`
-	EnableHR          bool    `json:"enable_hr"`
-	HRScale           float64 `json:"hr_scale"`
-	HRUpscaler        string  `json:"hr_upscaler"`
-	HRSecondPassSteps int     `json:"hr_second_pass_steps"`
-	DenoisingStrength float64 `json:"denoising_strength"`
-}
-
-// DefaultRequest builds a GenerateRequest with the project's locked style
-// parameters baked in. Only prompt + seed vary per item.
-func DefaultRequest(prompt string, seed int64) GenerateRequest {
-	return GenerateRequest{
-		Prompt:            prompt,
-		NegativePrompt:    NegativePrompt,
-		Seed:              seed,
-		SamplerName:       Sampler,
-		Steps:             Steps,
-		CFGScale:          CFGScale,
-		Width:             BaseWidth,
-		Height:            BaseHeight,
-		EnableHR:          true,
-		HRScale:           HiResScale,
-		HRUpscaler:        HiResUpscaler,
-		HRSecondPassSteps: HiResSteps,
-		DenoisingStrength: HiResDenoising,
-	}
-}
-
-// Client talks to a local AUTOMATIC1111 WebUI API.
+// Client talks to a local ComfyUI server.
 type Client struct {
-	BaseURL string
-	HTTP    *http.Client
+	BaseURL  string
+	HTTP     *http.Client
+	ClientID string
 }
 
 // NewClient constructs a Client with a long HTTP timeout suitable for CPU
-// generation (a single Hires Fix render can take 30+ minutes).
+// generation (a single 1024x1024 Flux render can take 5-10 minutes; the
+// HTTP timeout governs the per-call POST/GET, not the polling loop).
 func NewClient(baseURL string) *Client {
+	var idBytes [8]byte
+	_, _ = rand.Read(idBytes[:])
 	return &Client{
-		BaseURL: strings.TrimRight(baseURL, "/"),
-		HTTP:    &http.Client{Timeout: defaultHTTPTimeout},
+		BaseURL:  strings.TrimRight(baseURL, "/"),
+		HTTP:     &http.Client{Timeout: defaultHTTPTimeout},
+		ClientID: hex.EncodeToString(idBytes[:]),
 	}
 }
 
-type txt2imgResponse struct {
-	Images []string `json:"images"`
-	Info   string   `json:"info"`
+type queueResponse struct {
+	PromptID string `json:"prompt_id"`
 }
 
-type txt2imgInfo struct {
-	Seed int64 `json:"seed"`
+type historyEntry struct {
+	Status struct {
+		Completed bool   `json:"completed"`
+		StatusStr string `json:"status_str"`
+		Messages  [][]any `json:"messages"`
+	} `json:"status"`
+	Outputs map[string]struct {
+		Images []struct {
+			Filename  string `json:"filename"`
+			Subfolder string `json:"subfolder"`
+			Type      string `json:"type"`
+		} `json:"images"`
+	} `json:"outputs"`
 }
 
-// Generate sends a txt2img request to the WebUI and returns the decoded PNG
-// bytes plus the actual seed the server used (A1111 echoes the seed back in
-// `info`; when the caller passed -1 this will be the random one chosen).
-func (c *Client) Generate(ctx context.Context, req GenerateRequest) ([]byte, int64, error) {
-	body, err := json.Marshal(req)
+// Generate queues a Flux workflow with the given prompt+seed, polls until
+// ComfyUI finishes, and returns the PNG bytes plus the seed actually used
+// (echoed back so callers can persist it).
+func (c *Client) Generate(ctx context.Context, prompt string, seed int64) ([]byte, int64, error) {
+	wf := buildFluxWorkflow(prompt, seed)
+	body, err := json.Marshal(map[string]any{
+		"prompt":    wf,
+		"client_id": c.ClientID,
+	})
 	if err != nil {
-		return nil, 0, fmt.Errorf("marshal request: %w", err)
+		return nil, 0, fmt.Errorf("marshal prompt: %w", err)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/sdapi/v1/txt2img", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/prompt", bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.HTTP.Do(httpReq)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("txt2img request: %w", err)
+		return nil, 0, fmt.Errorf("queue prompt: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return nil, 0, fmt.Errorf("txt2img %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, 0, fmt.Errorf("queue prompt %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	var queued queueResponse
+	if err := json.NewDecoder(resp.Body).Decode(&queued); err != nil {
+		return nil, 0, fmt.Errorf("decode queue response: %w", err)
+	}
+	if queued.PromptID == "" {
+		return nil, 0, errors.New("queue prompt: empty prompt_id")
 	}
 
-	var decoded txt2imgResponse
-	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return nil, 0, fmt.Errorf("decode txt2img response: %w", err)
-	}
-	if len(decoded.Images) == 0 {
-		return nil, 0, errors.New("txt2img: no images in response")
-	}
-	img, err := base64.StdEncoding.DecodeString(decoded.Images[0])
+	entry, err := c.waitForHistory(ctx, queued.PromptID)
 	if err != nil {
-		return nil, 0, fmt.Errorf("decode base64 image: %w", err)
+		return nil, 0, err
 	}
 
-	seed := req.Seed
-	var info txt2imgInfo
-	if jsonErr := json.Unmarshal([]byte(decoded.Info), &info); jsonErr == nil && info.Seed != 0 {
-		seed = info.Seed
+	for _, out := range entry.Outputs {
+		for _, img := range out.Images {
+			data, err := c.fetchImage(ctx, img.Filename, img.Subfolder, img.Type)
+			if err != nil {
+				return nil, 0, err
+			}
+			return data, seed, nil
+		}
 	}
-	return img, seed, nil
+	return nil, 0, errors.New("workflow completed but no images in outputs")
 }
 
-// ModelTitle returns the name of the currently-loaded checkpoint via
-// `/sdapi/v1/options`. Empty string if the field isn't reported.
+func (c *Client) waitForHistory(ctx context.Context, promptID string) (*historyEntry, error) {
+	url := c.BaseURL + "/history/" + promptID
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		resp, err := c.HTTP.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("poll history: %w", err)
+		}
+		var raw map[string]historyEntry
+		dec := json.NewDecoder(resp.Body)
+		decErr := dec.Decode(&raw)
+		resp.Body.Close()
+		if decErr != nil {
+			return nil, fmt.Errorf("decode history: %w", decErr)
+		}
+		if entry, ok := raw[promptID]; ok && entry.Status.Completed {
+			if strings.HasPrefix(strings.ToLower(entry.Status.StatusStr), "error") {
+				return nil, fmt.Errorf("workflow failed: %s", entry.Status.StatusStr)
+			}
+			return &entry, nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
+func (c *Client) fetchImage(ctx context.Context, filename, subfolder, kind string) ([]byte, error) {
+	q := url.Values{}
+	q.Set("filename", filename)
+	q.Set("subfolder", subfolder)
+	q.Set("type", kind)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/view?"+q.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch image: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("fetch image %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return io.ReadAll(resp.Body)
+}
+
+// ModelTitle returns the configured Flux UNet filename, after a quick
+// liveness check against the ComfyUI server. Returns an error if the server
+// isn't reachable.
 func (c *Client) ModelTitle(ctx context.Context) (string, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/sdapi/v1/options", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/system_stats", nil)
 	if err != nil {
 		return "", err
 	}
-	resp, err := c.HTTP.Do(httpReq)
+	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("options %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return "", fmt.Errorf("system_stats %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	var opts map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&opts); err != nil {
-		return "", err
-	}
-	if v, ok := opts["sd_model_checkpoint"].(string); ok {
-		return v, nil
-	}
-	return "", nil
+	io.Copy(io.Discard, resp.Body)
+	return UNetModel, nil
 }
