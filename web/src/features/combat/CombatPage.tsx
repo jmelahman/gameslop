@@ -25,6 +25,7 @@ import { useItemIndex } from "@/hooks/useCatalog";
 import { useReplay } from "@/lib/combat/sequencer";
 import { cn } from "@/lib/cn";
 import { useRunStore } from "@/store/runStore";
+import { useSettingsStore } from "@/store/settingsStore";
 import type { BoardItem, CombatResponse, Item, TickEvent } from "@/types/game";
 
 // Hold on the final tick before navigating to results so the player can read
@@ -41,6 +42,7 @@ export default function CombatPage() {
   const combat = useRunStore((s) => s.combat);
   const setCombat = useRunStore((s) => s.setCombat);
   const setPhase = useRunStore((s) => s.setPhase);
+  const skipAnimations = useSettingsStore((s) => s.skipAnimations);
 
   // Recovery path: if the store is empty (server-side restart, manual cache
   // wipe, etc.) fall back to the persisted encounter.
@@ -66,7 +68,19 @@ export default function CombatPage() {
     }
   }, [combat, recovery.isLoading, recovery.data, setPhase, navigate]);
 
+  // Skip-animations accessibility path: as soon as we have a combat result,
+  // jump straight to the results screen instead of mounting the replay.
+  // The CombatResponse already carries the final HP / outcome, so nothing
+  // is lost by skipping the tick log.
+  useEffect(() => {
+    if (combat && skipAnimations) {
+      setPhase("results");
+      navigate("/run/results", { replace: true });
+    }
+  }, [combat, skipAnimations, setPhase, navigate]);
+
   if (!combat) return <CombatSkeleton />;
+  if (skipAnimations) return <CombatSkeleton />;
 
   return (
     <CombatPlayer
@@ -116,6 +130,18 @@ function CombatPlayer({ combat, onDone }: { combat: CombatResponse; onDone: () =
         event: ev,
       });
     });
+    // Sound effect stubs — Phase 13 only lays the call sites; audio assets
+    // land later. Each event type maps to a distinct sample so the UI
+    // sounds (item-fire ping, damage thump, heal sparkle, shield clang)
+    // can be authored independently.
+    //
+    // TODO(audio): for ev of currentEvents:
+    //   item_fired   → new Audio("/sfx/item-fire.wav").play()
+    //   damage       → new Audio("/sfx/hit.wav").play()
+    //   heal         → new Audio("/sfx/heal.wav").play()
+    //   shield_*     → new Audio("/sfx/shield.wav").play()
+    //   death        → new Audio("/sfx/death.wav").play()
+    //   fight_end    → new Audio("/sfx/fight-end.wav").play()
     if (fresh.length === 0) return;
     setActiveDamage((prev) => [...prev, ...fresh]);
     const ids = new Set(fresh.map((f) => f.id));
@@ -170,6 +196,53 @@ function CombatPlayer({ combat, onDone }: { combat: CombatResponse; onDone: () =
     const t = setTimeout(onDone, POST_TICK_HOLD_MS);
     return () => clearTimeout(t);
   }, [status, onDone]);
+
+  // Keyboard shortcuts for the combat replay: Space toggles play/pause,
+  // S skips to the end, R restarts, arrow keys scrub one tick at a time.
+  // Skips events when focus is in an input (e.g. the seek-bar range input
+  // already owns arrow keys natively).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.repeat) return;
+      const tgt = e.target;
+      if (
+        tgt instanceof HTMLInputElement ||
+        tgt instanceof HTMLTextAreaElement ||
+        (tgt instanceof HTMLElement && tgt.isContentEditable)
+      ) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (e.key === " " || e.code === "Space") {
+        e.preventDefault();
+        if (status === "playing") dispatch({ type: "PAUSE" });
+        else dispatch({ type: "PLAY" });
+        return;
+      }
+      if (key === "s") {
+        e.preventDefault();
+        dispatch({ type: "SEEK", tick: maxTick });
+        return;
+      }
+      if (key === "r") {
+        e.preventDefault();
+        dispatch({ type: "RESET" });
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        dispatch({ type: "SEEK", tick: Math.max(0, currentTick - 1) });
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        dispatch({ type: "SEEK", tick: Math.min(maxTick, currentTick + 1) });
+        return;
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [status, currentTick, maxTick, dispatch]);
 
   const playerDead = playerHp <= 0;
   const opponentDead = opponentHp <= 0;

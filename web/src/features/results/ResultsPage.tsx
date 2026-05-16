@@ -1,21 +1,47 @@
 // ResultsPage — what the player sees after CombatPage finishes the tick log.
-// Phase 5 ships a minimal banner + two actions:
-//   - Continue: advance to the next day (back to /run), or return to the
-//     start menu when the run terminated (final win or loss).
-//   - Abandon: DELETE /api/runs/active, clear local state, back to menu.
+//
+// Phase 13 surface:
+//   - Outcome banner (win / loss / tie + final-run win/loss callouts).
+//   - Day counter (days survived this run).
+//   - Stat grid: damage dealt, damage taken, items fired, gold on hand, hp.
+//   - Final board snapshot — the player's board exactly as it went into
+//     combat, with tier coloring.
+//   - Recent runs strip (loaded from /api/runs/history).
+//   - Continue / Abandon / View stats actions.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { Coins, Heart, Sparkles, Swords, Trophy } from "lucide-react";
-import { useEffect } from "react";
+import {
+  BarChart3,
+  Coins,
+  Heart,
+  Package,
+  Shield,
+  Sparkles,
+  Sword,
+  Swords,
+  Trophy,
+  Zap,
+} from "lucide-react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router";
 import { ApiError } from "@/api/client";
-import { abandonRun, getRunHistory, type RunHistoryEntry } from "@/api/runs";
+import { abandonRun, getRunHistory, type RunHistoryEntry, type RunHistoryPage } from "@/api/runs";
+import { ItemCard } from "@/components/game/ItemCard";
+import { useItemIndex } from "@/hooks/useCatalog";
 import { RUN_QUERY_KEY } from "@/hooks/useRun";
 import { cn } from "@/lib/cn";
+import { summarizeFight } from "@/lib/combat/stats";
 import { MAX_DAY } from "@/lib/progression";
 import { useRunStore } from "@/store/runStore";
-import type { CombatOutcome, RunStatus } from "@/types/game";
+import type { BoardItem, CombatOutcome, Item, RunStatus } from "@/types/game";
+
+// Sound effect stubs — Phase 13 lays the call sites; real audio assets land
+// later. Keeping these as commented Audio() invocations means the wiring is
+// in place at the right code path without shipping silent files.
+//
+// TODO(audio): play sfx/victory.wav on win, sfx/defeat.wav on loss,
+// sfx/draw.wav on tie. e.g. `new Audio("/sfx/victory.wav").play()`.
 
 export default function ResultsPage() {
   const navigate = useNavigate();
@@ -24,6 +50,7 @@ export default function ResultsPage() {
   const setPhase = useRunStore((s) => s.setPhase);
   const setCombat = useRunStore((s) => s.setCombat);
   const clearRun = useRunStore((s) => s.clearRun);
+  const itemIndex = useItemIndex();
 
   // If somebody lands here with no result (manual URL, expired session),
   // bounce back to the shop phase rather than show an empty screen.
@@ -51,12 +78,14 @@ export default function ResultsPage() {
     throwOnError: false,
   });
 
-  if (!combat) return null;
+  const fightStats = useMemo(() => (combat ? summarizeFight(combat.result.ticks) : null), [combat]);
+
+  if (!combat || !fightStats) return null;
 
   const banner = bannerFor(combat.result.outcome, combat.ended, combat.finalOutcome);
-  const hpDelta = combat.result.playerEndHp - combat.result.playerStartHp;
   const isFinalWin = combat.ended && combat.finalOutcome === "won";
   const isFinalLoss = combat.ended && combat.finalOutcome === "lost";
+  const daysSurvived = daysSurvivedFor(combat.day, combat.result.outcome, combat.ended);
 
   const onContinue = () => {
     if (combat.ended) {
@@ -72,7 +101,7 @@ export default function ResultsPage() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 bg-slate-950 px-6 py-12 text-slate-50">
+    <main className="relative flex min-h-screen flex-col items-center gap-8 bg-slate-950 px-6 py-12 text-slate-50">
       {isFinalWin ? <WinFanfare /> : null}
 
       <motion.header
@@ -82,7 +111,7 @@ export default function ResultsPage() {
         transition={{ duration: 0.45, ease: "easeOut" }}
       >
         <p className="text-slate-400 text-xs uppercase tracking-widest">
-          Day {combat.day}
+          Day {combat.day} / {MAX_DAY}
           {isFinalWin ? " · Final" : ""}
           {isFinalLoss ? " · Run end" : ""}
         </p>
@@ -105,25 +134,20 @@ export default function ResultsPage() {
         ) : null}
       </motion.header>
 
-      <section className="grid w-full max-w-md grid-cols-3 gap-3 rounded-lg border border-slate-800 bg-slate-900/60 p-5">
-        <Stat
-          icon={<Heart className="h-4 w-4 text-rose-400" />}
-          label="fight hp left"
-          value={Math.max(0, combat.result.playerEndHp)}
-        />
-        <Stat
-          icon={<Swords className="h-4 w-4 text-amber-300" />}
-          label="hp lost"
-          value={Math.max(0, -hpDelta)}
-        />
-        <Stat
-          icon={<Coins className="h-4 w-4 text-amber-300" />}
-          label="run gold"
-          value={combat.run?.state.gold ?? 0}
-        />
-      </section>
+      <StatGrid
+        daysSurvived={daysSurvived}
+        damageDealt={fightStats.damageDealt}
+        damageTaken={fightStats.damageTaken}
+        healed={fightStats.healed}
+        shieldApplied={fightStats.shieldApplied}
+        itemsUsed={fightStats.itemsUsed}
+        gold={combat.run?.state.gold ?? 0}
+        runHp={combat.run?.state.hp ?? null}
+      />
 
-      {combat.ended ? <RunHistoryTable /> : null}
+      <FinalBoard board={combat.playerBoard} itemIndex={itemIndex} />
+
+      {combat.ended ? <RunHistoryStrip /> : null}
 
       <div className="flex w-full max-w-md flex-col gap-3">
         <button
@@ -133,16 +157,25 @@ export default function ResultsPage() {
         >
           {combat.ended ? "Back to menu" : "Continue"}
         </button>
-        {!combat.ended ? (
+        <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => abandon.mutate()}
-            disabled={abandon.isPending}
-            className="rounded-md border border-rose-800 bg-rose-950/40 px-4 py-2 text-rose-200 text-sm hover:bg-rose-900/40 disabled:opacity-50"
+            onClick={() => navigate("/stats")}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-slate-700 bg-slate-900/60 px-4 py-2 text-slate-200 text-sm hover:border-amber-700 hover:text-amber-200"
           >
-            {abandon.isPending ? "Abandoning…" : "Abandon run"}
+            <BarChart3 className="h-4 w-4" /> View stats
           </button>
-        ) : null}
+          {!combat.ended ? (
+            <button
+              type="button"
+              onClick={() => abandon.mutate()}
+              disabled={abandon.isPending}
+              className="flex-1 rounded-md border border-rose-800 bg-rose-950/40 px-4 py-2 text-rose-200 text-sm hover:bg-rose-900/40 disabled:opacity-50"
+            >
+              {abandon.isPending ? "Abandoning…" : "Abandon run"}
+            </button>
+          ) : null}
+        </div>
         {abandon.error instanceof ApiError ? (
           <p className="text-rose-300 text-xs">{abandon.error.message}</p>
         ) : null}
@@ -182,17 +215,116 @@ function WinFanfare() {
   );
 }
 
-function RunHistoryTable() {
-  const { data, isLoading } = useQuery<RunHistoryEntry[]>({
-    queryKey: ["run-history"],
-    queryFn: () => getRunHistory(5),
+function StatGrid(props: {
+  daysSurvived: number;
+  damageDealt: number;
+  damageTaken: number;
+  healed: number;
+  shieldApplied: number;
+  itemsUsed: number;
+  gold: number;
+  runHp: number | null;
+}) {
+  const tiles = [
+    {
+      key: "days",
+      icon: <Trophy className="h-4 w-4 text-amber-300" />,
+      label: "days survived",
+      value: `${props.daysSurvived}/${MAX_DAY}`,
+    },
+    {
+      key: "dmg-out",
+      icon: <Sword className="h-4 w-4 text-rose-300" />,
+      label: "damage dealt",
+      value: props.damageDealt,
+    },
+    {
+      key: "dmg-in",
+      icon: <Swords className="h-4 w-4 text-rose-400" />,
+      label: "damage taken",
+      value: props.damageTaken,
+    },
+    {
+      key: "items",
+      icon: <Zap className="h-4 w-4 text-amber-200" />,
+      label: "items used",
+      value: props.itemsUsed,
+    },
+    {
+      key: "shield",
+      icon: <Shield className="h-4 w-4 text-cyan-300" />,
+      label: "shield applied",
+      value: props.shieldApplied,
+    },
+    {
+      key: "heal",
+      icon: <Heart className="h-4 w-4 text-emerald-300" />,
+      label: "healed",
+      value: props.healed,
+    },
+    {
+      key: "gold",
+      icon: <Coins className="h-4 w-4 text-amber-300" />,
+      label: "run gold",
+      value: props.gold,
+    },
+    ...(props.runHp !== null
+      ? [
+          {
+            key: "run-hp",
+            icon: <Heart className="h-4 w-4 text-rose-400" />,
+            label: "run hp",
+            value: props.runHp,
+          },
+        ]
+      : []),
+  ];
+
+  return (
+    <section className="grid w-full max-w-2xl grid-cols-2 gap-3 rounded-lg border border-slate-800 bg-slate-900/60 p-5 sm:grid-cols-4">
+      {tiles.map((t) => (
+        <div key={t.key} className="flex flex-col items-center gap-1">
+          <div className="flex items-center gap-1">
+            {t.icon}
+            <span className="font-mono text-lg">{t.value}</span>
+          </div>
+          <span className="text-slate-500 text-xs uppercase tracking-wider">{t.label}</span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function FinalBoard({ board, itemIndex }: { board: BoardItem[]; itemIndex: Record<string, Item> }) {
+  if (board.length === 0) return null;
+  return (
+    <section className="w-full max-w-2xl">
+      <h3 className="mb-2 flex items-center gap-1.5 text-slate-400 text-xs uppercase tracking-wider">
+        <Package className="h-3.5 w-3.5" />
+        Final board
+      </h3>
+      <div className="grid grid-cols-10 gap-2 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        {board.map((b) => {
+          const def = itemIndex[b.itemId];
+          if (!def) return null;
+          return <ItemCard key={`${b.slot}-${b.itemId}`} item={def} showTooltip={false} />;
+        })}
+      </div>
+    </section>
+  );
+}
+
+function RunHistoryStrip() {
+  const { data, isLoading } = useQuery<RunHistoryPage>({
+    queryKey: ["run-history", { limit: 5, offset: 0 }],
+    queryFn: () => getRunHistory(5, 0),
     staleTime: 0,
   });
 
   if (isLoading) {
     return <p className="text-slate-500 text-xs uppercase tracking-wider">Loading history…</p>;
   }
-  const rows = data ?? [];
+  const rows: RunHistoryEntry[] = data?.entries ?? [];
   if (rows.length === 0) return null;
 
   return (
@@ -244,14 +376,16 @@ function bannerFor(
   }
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <div className="flex items-center gap-1">
-        {icon}
-        <span className="font-mono text-lg">{value}</span>
-      </div>
-      <span className="text-slate-500 text-xs uppercase tracking-wider">{label}</span>
-    </div>
-  );
+// daysSurvivedFor maps the encounter's day number to a "days survived" stat
+// the player intuits as completed days. A win on day N means N days survived;
+// a loss on day N counts as N-1 completed days unless they survived the HP
+// cost (which still advances them past day N in the engine, but the player
+// reads "I made it through" — keep the simple definition since the run page
+// already shows current day / max day separately.).
+function daysSurvivedFor(day: number, outcome: CombatOutcome, ended: boolean): number {
+  if (ended && outcome === "win") return MAX_DAY;
+  if (outcome === "win") return day;
+  if (outcome === "tie") return day;
+  // Loss: still completed (day-1) full days; this fight was the one that hurt.
+  return Math.max(0, day - 1);
 }

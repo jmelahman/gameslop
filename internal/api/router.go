@@ -29,6 +29,7 @@ func Register(mux *http.ServeMux, d Deps) {
 	mux.HandleFunc("GET /api/runs/active", rh.active)
 	mux.HandleFunc("DELETE /api/runs/active", rh.abandon)
 	mux.HandleFunc("GET /api/runs/history", rh.history)
+	mux.HandleFunc("DELETE /api/runs/history", rh.clearHistory)
 
 	mux.HandleFunc("POST /api/runs/active/shop/buy", sh.buy)
 	mux.HandleFunc("POST /api/runs/active/shop/refresh", sh.refresh)

@@ -77,3 +77,26 @@ func (s *HistoryStore) List(ctx context.Context, playerID int64, limit, offset i
 	}
 	return out, rows.Err()
 }
+
+// Count returns the total number of run_history rows for the player. Used by
+// the /stats page to size paginated controls.
+func (s *HistoryStore) Count(ctx context.Context, playerID int64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM run_history WHERE player_id = ?`, playerID,
+	).Scan(&n)
+	return n, err
+}
+
+// Clear deletes every run_history row for the player. Only the finished
+// runs are removed; an active run continues unaffected. Returns the number
+// of rows deleted.
+func (s *HistoryStore) Clear(ctx context.Context, playerID int64) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM run_history WHERE player_id = ?`, playerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

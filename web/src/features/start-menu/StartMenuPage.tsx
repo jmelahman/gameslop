@@ -22,7 +22,7 @@ export default function StartMenuPage() {
       disabled: !runId,
       hint: runId ? undefined : "no active run",
     },
-    { label: "Stats", to: "/settings" },
+    { label: "Stats", to: "/stats" },
     { label: "Settings", to: "/settings" },
   ];
 

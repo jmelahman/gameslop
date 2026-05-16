@@ -60,6 +60,15 @@ func (h *runHandler) active(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+// historyResponse pairs the page of history rows with the total count so the
+// /stats page can render paginated controls without a second request.
+type historyResponse struct {
+	Entries []store.HistoryEntry `json:"entries"`
+	Total   int                  `json:"total"`
+	Limit   int                  `json:"limit"`
+	Offset  int                  `json:"offset"`
+}
+
 func (h *runHandler) history(w http.ResponseWriter, r *http.Request) {
 	limit := parseIntParam(r, "limit", 20)
 	offset := parseIntParam(r, "offset", 0)
@@ -71,7 +80,25 @@ func (h *runHandler) history(w http.ResponseWriter, r *http.Request) {
 	if entries == nil {
 		entries = []store.HistoryEntry{}
 	}
-	writeJSON(w, http.StatusOK, entries)
+	total, err := h.deps.History.Count(r.Context(), store.DefaultPlayerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, historyResponse{
+		Entries: entries,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	})
+}
+
+func (h *runHandler) clearHistory(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.deps.History.Clear(r.Context(), store.DefaultPlayerID); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func parseIntParam(r *http.Request, key string, fallback int) int {

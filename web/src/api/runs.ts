@@ -33,6 +33,13 @@ export type RunHistoryEntry = {
   finishedAt: number;
 };
 
+export type RunHistoryPage = {
+  entries: RunHistoryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 type WireHistoryEntry = {
   id: number;
   run_id: number;
@@ -42,14 +49,36 @@ type WireHistoryEntry = {
   finished_at: number;
 };
 
-export async function getRunHistory(limit = 20): Promise<RunHistoryEntry[]> {
-  const wire = await apiFetch<WireHistoryEntry[]>(`/api/runs/history?limit=${limit}`);
-  return wire.map((w) => ({
+type WireHistoryResponse = {
+  entries: WireHistoryEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+function toDomainHistory(w: WireHistoryEntry): RunHistoryEntry {
+  return {
     id: w.id,
     runId: w.run_id,
     heroId: w.hero_id,
     daysReached: w.days_reached,
     outcome: w.outcome,
     finishedAt: w.finished_at,
-  }));
+  };
+}
+
+export async function getRunHistory(limit = 20, offset = 0): Promise<RunHistoryPage> {
+  const wire = await apiFetch<WireHistoryResponse>(
+    `/api/runs/history?limit=${limit}&offset=${offset}`,
+  );
+  return {
+    entries: wire.entries.map(toDomainHistory),
+    total: wire.total,
+    limit: wire.limit,
+    offset: wire.offset,
+  };
+}
+
+export async function clearRunHistory(): Promise<void> {
+  await apiFetch<void>("/api/runs/history", { method: "DELETE" });
 }

@@ -100,6 +100,7 @@ export default function ShopPage() {
   const combat = useMutation({
     mutationFn: startCombat,
     onSuccess: (resp) => {
+      // TODO(audio): new Audio("/sfx/combat-start.wav").play()
       setCombat(resp);
       setPhase("combat");
       if (resp.run) {
