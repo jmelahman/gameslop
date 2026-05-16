@@ -29,6 +29,12 @@ go.work.sum
 # Allowlist legit asset locations below; use `git add -f` for one-off exceptions.
 *.png
 !assets/*.png
+!web/public/items/*.png
+
+# Local Stable Diffusion data: models (multi-GB), outputs, cached configs.
+# Track only `art/README.md` describing the layout.
+art/sd-data/
+
 .claude-tmp/
 .claude/settings.local.json
 .claude/scheduled_tasks.lock

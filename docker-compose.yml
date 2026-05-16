@@ -1,0 +1,41 @@
+# Local Stable Diffusion WebUI (AUTOMATIC1111) running on CPU. Used by
+# `cmd/genart` to generate item icon art. CPU-only is intentional — quality
+# over speed; expect 15–30 min per 1024×1024 image with Hires Fix.
+#
+# Bring up:           docker compose up -d stable-diffusion
+# Health check:       curl http://localhost:7860/sdapi/v1/sd-models
+# Tear down:          docker compose down
+#
+# Model + LoRA download: see art/README.md.
+#
+# Networking: the devcontainer's `kanban-network` is declared external so
+# both containers can talk via DNS name `stable-diffusion`. If that network
+# doesn't exist on your machine, comment the `kanban-network` block below
+# and use the `gameslop-net` block instead (compose will create it for you).
+services:
+  stable-diffusion:
+    image: ghcr.io/abdbarho/stable-diffusion-webui-docker:auto-cpu-latest
+    container_name: gameslop-sd
+    command: >-
+      --api
+      --listen
+      --use-cpu all
+      --no-half
+      --precision full
+      --skip-torch-cuda-test
+      --disable-nan-check
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./art/sd-data/models:/data/models
+      - ./art/sd-data/outputs:/output
+      - ./art/sd-data/config:/data/config
+    restart: unless-stopped
+    networks:
+      - kanban-network
+      # - gameslop-net
+
+networks:
+  kanban-network:
+    external: true
+  # gameslop-net: {}
