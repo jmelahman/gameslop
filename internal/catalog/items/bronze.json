@@ -1,0 +1,91 @@
+[
+  {
+    "id": "rusty_sword",
+    "name": "Rusty Sword",
+    "tier": "bronze",
+    "size": 1,
+    "tags": ["Weapon"],
+    "buy_cost": 3,
+    "sell_value": 1,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 4000,
+        "effects": [
+          { "op": "damage", "target": "opponent_random", "value": 5 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "wooden_shield",
+    "name": "Wooden Shield",
+    "tier": "bronze",
+    "size": 1,
+    "tags": ["Shield"],
+    "buy_cost": 3,
+    "sell_value": 1,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 6000,
+        "effects": [
+          { "op": "shield", "target": "self_player", "value": 6 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "healing_potion",
+    "name": "Healing Potion",
+    "tier": "bronze",
+    "size": 1,
+    "tags": ["Potion"],
+    "buy_cost": 2,
+    "sell_value": 1,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 8000,
+        "effects": [
+          { "op": "heal", "target": "self_player", "value": 8 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "iron_dagger",
+    "name": "Iron Dagger",
+    "tier": "bronze",
+    "size": 1,
+    "tags": ["Weapon"],
+    "buy_cost": 3,
+    "sell_value": 1,
+    "triggers": [
+      {
+        "type": "cooldown",
+        "cooldown_ms": 2500,
+        "effects": [
+          { "op": "damage", "target": "opponent_random", "value": 3 }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "lucky_coin",
+    "name": "Lucky Coin",
+    "tier": "bronze",
+    "size": 1,
+    "tags": ["Trinket"],
+    "buy_cost": 2,
+    "sell_value": 2,
+    "triggers": [
+      {
+        "type": "on_sell",
+        "effects": [
+          { "op": "gain_gold", "target": "self_player", "value": 2 }
+        ]
+      }
+    ]
+  }
+]

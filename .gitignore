@@ -36,6 +36,12 @@ go.work.sum
 # release artifacts
 /gameslop
 
+# local SQLite database
+gameslop.db
+gameslop.db-journal
+gameslop.db-wal
+gameslop.db-shm
+
 # frontend
 web/node_modules/
 web/dist/*

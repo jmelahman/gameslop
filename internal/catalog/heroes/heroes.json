@@ -1,0 +1,8 @@
+[
+  {
+    "id": "knight",
+    "name": "Knight",
+    "description": "A stalwart fighter who favors weapons and shields.",
+    "starting_hp": 100
+  }
+]
