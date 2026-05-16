@@ -39,8 +39,11 @@ dl "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_
 dl "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors" \
    "$CLIP/clip_l.safetensors"
 
-# Flux VAE (~335 MB). FLUX.1-schnell is Apache-2.0 and ungated.
-dl "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/ae.safetensors" \
+# Flux VAE (~335 MB). The official black-forest-labs repo gates downloads
+# (401 without HF auth) even though schnell weights are Apache-2.0. This is
+# a community mirror of the same .safetensors file under its old `.sft`
+# extension; we rename it to ae.safetensors to match the VAELoader config.
+dl "https://huggingface.co/cocktailpeanut/xulf-dev/resolve/main/ae.sft" \
    "$VAE/ae.safetensors"
 
 # ComfyUI-GGUF custom node: lets ComfyUI load the .gguf UNet above.
